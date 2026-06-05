@@ -1,0 +1,6 @@
+{
+  "name": "Cyberdeck Gesture Controller",
+  "description": "Synthwave terminal and interactive cyberdeck UI reacting to OpenCV/MediaPipe hand gestures from Python or local webcam.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

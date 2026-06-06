@@ -4,12 +4,12 @@
  */
 
 import React, { useRef, useEffect } from 'react';
-import { GestureEvent } from '../types';
 
 interface HologramCanvasProps {
   currentPinch: { x: number; y: number } | null;
   isFistActive: boolean;
   lastSwipe: { direction: 'SWIPE_LEFT' | 'SWIPE_RIGHT'; timestamp: number } | null;
+  currentLandmarks?: { x: number; y: number; z: number }[] | null;
 }
 
 interface Particle {
@@ -23,15 +23,77 @@ interface Particle {
   size: number;
 }
 
-export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }: HologramCanvasProps) {
+// Procedural beautiful holographic finger skeleton generator for simulator fallback
+function generateProceduralHand(cx: number, cy: number, isClenched: boolean): { x: number; y: number; z: number }[] {
+  const pts: { x: number; y: number; z: number }[] = [];
+  
+  // Base wrist point (0)
+  const wx = cx;
+  const wy = cy + 0.16;
+  pts.push({ x: wx, y: wy, z: 0 });
+  
+  // Finger angles mapping from thumb to pinky
+  const angles = [-0.55, -0.22, 0.0, 0.22, 0.45];
+  const ext = isClenched ? 0.045 : 0.11; // Open vs clenched finger length
+  
+  // Create 4 points for each of the 5 fingers
+  for (let f = 0; f < 5; f++) {
+    const angle = angles[f];
+    const kDist = 0.07; // knuckle distance
+    
+    // Knuckle Base MCP (coordinates 1, 5, 9, 13, 17)
+    const kx = cx + Math.sin(angle) * kDist * 0.75;
+    const ky = cy + Math.cos(angle) * kDist * 0.4;
+    pts.push({ x: kx, y: ky, z: 10 });
+    
+    let lastX = kx;
+    let lastY = ky;
+    const segmentLength = ext * (f === 0 ? 0.6 : f === 4 ? 0.7 : 0.85) / 3;
+    
+    for (let seg = 0; seg < 3; seg++) {
+      // Clenched fingers curl inward slightly on the Y coordinate
+      const curlOffset = isClenched ? (seg + 1) * 0.015 : -0.005;
+      const combinedAngle = angle + (f === 0 ? -0.2 : 0);
+      const nextX = lastX + Math.sin(combinedAngle) * segmentLength;
+      const nextY = lastY - Math.cos(combinedAngle) * segmentLength + curlOffset;
+      
+      pts.push({ x: nextX, y: nextY, z: -10 * (seg + 1) });
+      lastX = nextX;
+      lastY = nextY;
+    }
+  }
+  
+  return pts;
+}
+
+export default function HologramCanvas({ 
+  currentPinch, 
+  isFistActive, 
+  lastSwipe,
+  currentLandmarks
+}: HologramCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
   
+  // Keep live track of state props in mutable refs to keep the frame loop detached from React re-renders, 
+  // preventing context tearing, and matching 60FPS rendering logic.
+  const currentPinchRef = useRef(currentPinch);
+  const isFistActiveRef = useRef(isFistActive);
+  const currentLandmarksRef = useRef(currentLandmarks);
+  
+  useEffect(() => {
+    currentPinchRef.current = currentPinch;
+    isFistActiveRef.current = isFistActive;
+    currentLandmarksRef.current = currentLandmarks;
+  }, [currentPinch, isFistActive, currentLandmarks]);
+
   // Physics / Interaction parameters
   const targetRotationX = useRef(0);
   const targetRotationY = useRef(0);
   const currentRotationX = useRef(0);
   const currentRotationY = useRef(0);
+  const rotationVelocityX = useRef(0);
+  const rotationVelocityY = useRef(0);
   const rotationSpeed = useRef(0.005);
   const swipeRotationVelocityY = useRef(0); // Rotational speed impulse from swipes
   const centroidX = useRef(0.5);
@@ -39,7 +101,7 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
   const targetCentroidX = useRef(0.5);
   const targetCentroidY = useRef(0.5);
   
-  // Collapse controller for Fist gesture (lerping from 1.0 down to 0.0)
+  // Collapse controller for Fist gesture (lerping from 1.0 down to a tight dense visual)
   const collapseFactor = useRef(1.0);
   const explosionPulse = useRef(0);
 
@@ -47,11 +109,10 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
   const swipePosition = useRef(-1);
   const activeSwipe = useRef<'LEFT' | 'RIGHT' | null>(null);
 
-  // Initialize and preserve a set of 3D spherical particles
+  // Initialize and preserve 3D spherical particles
   const particles = useRef<Particle[]>([]);
 
   useEffect(() => {
-    // Generate particles
     const list: Particle[] = [];
     const count = 350;
     const colors = [
@@ -82,33 +143,39 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
     particles.current = list;
   }, []);
 
-  // Update centroid and rotation based on PINCH coordinates
+  // Update centroid and rotation based on live coords
   useEffect(() => {
-    if (currentPinch) {
-      targetCentroidX.current = currentPinch.x;
-      targetCentroidY.current = currentPinch.y;
+    const activeFist = isFistActiveRef.current;
+    const activePinch = currentPinchRef.current;
+
+    if (activeFist && activePinch) {
+      targetCentroidX.current = activePinch.x;
+      targetCentroidY.current = activePinch.y;
       
-      // Control rotation speeds based on pinch relative position
-      targetRotationX.current = (currentPinch.y - 0.5) * Math.PI * 2;
-      targetRotationY.current = (currentPinch.x - 0.5) * Math.PI * 2;
+      // Control rotation speeds based on position
+      targetRotationX.current = (activePinch.y - 0.5) * Math.PI * 2;
+      targetRotationY.current = (activePinch.x - 0.5) * Math.PI * 2;
+    } else if (activePinch) {
+      targetCentroidX.current = activePinch.x;
+      targetCentroidY.current = activePinch.y;
     } else {
-      // Revert to stable floating rotation parameters
+      // Revert floating parameters back to centered
       targetCentroidX.current = 0.5;
       targetCentroidY.current = 0.5;
     }
-  }, [currentPinch]);
+  }, [currentPinch, isFistActive]);
 
-  // Handle Swipe trigger triggering animations
+  // Handle Swipe triggers
   useEffect(() => {
     if (lastSwipe) {
       if (lastSwipe.direction === 'SWIPE_LEFT') {
-        swipePosition.current = 1.1; // Animation flows from right side to left side
+        swipePosition.current = 1.1; 
         activeSwipe.current = 'LEFT';
-        swipeRotationVelocityY.current = -0.32; // Velocity impulse (spin counter-clockwise / left)
+        swipeRotationVelocityY.current = -0.32; 
       } else {
-        swipePosition.current = -0.1; // Animation flows from left to right
+        swipePosition.current = -0.1; 
         activeSwipe.current = 'RIGHT';
-        swipeRotationVelocityY.current = 0.32; // Velocity impulse (spin clockwise / right)
+        swipeRotationVelocityY.current = 0.32; 
       }
     }
   }, [lastSwipe]);
@@ -128,54 +195,95 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
     window.addEventListener('resize', handleResize);
     handleResize();
 
-    // MAIN CANVAS LOOP
+    // FPS Pacing tracker ref
+    let lastFrameTime = performance.now();
+
+    // MAIN HIGH PERF RENDER LOOP (DECOUPLED AND THROTTLED)
     const render = () => {
+      animationRef.current = requestAnimationFrame(render);
+
+      const now = performance.now();
+      const elapsed = now - lastFrameTime;
+
+      // Restrict rendering updates to a maximum of 60 frames per second to reduce high frame-rate noise
+      if (elapsed < 16.0) return; 
+      lastFrameTime = now - (elapsed % 16.67);
+
+      const activeFist = isFistActiveRef.current;
+      const activePinch = currentPinchRef.current;
+      const activeLandmarks = currentLandmarksRef.current;
+
+      // Draw standard dark canvas feed background
       ctx.fillStyle = '#06030c';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // Draw Retro Synthwave Grid Perspective Background
       drawGrid(ctx, canvas.width, canvas.height);
 
-      // Damping/Interpolating hand centroid calculations (Physics smoothness)
+      // Core ease damping / interpolations (smooth movement)
       const easing = 0.1;
       centroidX.current += (targetCentroidX.current - centroidX.current) * easing;
       centroidY.current += (targetCentroidY.current - centroidY.current) * easing;
 
-      // Handle FIST clenching factor interpolations
-      if (isFistActive) {
-        collapseFactor.current += (0.01 - collapseFactor.current) * 0.15; // fast tight collapse!
-        explosionPulse.current = 1.0; // Ready the explosive visual frame
+      // Amplified dynamic sphere size scale check (Shrink on Fist clench, expand on release)
+      if (activeFist) {
+        collapseFactor.current += (0.18 - collapseFactor.current) * 0.16; // Shrinks to extremely tight dense visual core!
+        explosionPulse.current = 1.0; // Prepare the release explosive visual frame
       } else {
-        collapseFactor.current += (1.0 - collapseFactor.current) * 0.08; // smooth expand back
+        collapseFactor.current += (1.12 - collapseFactor.current) * 0.085; // Expands back smoothly to generous scale!
         
-        // Dissipate the explosive shockwave animation pulse
+        // Dissipate the explosive shockwave pulse ring
         if (explosionPulse.current > 0) {
-          explosionPulse.current -= 0.02;
+          explosionPulse.current -= 0.022;
         }
       }
 
-      // Smooth decay swipe velocity impulse
+      // Smooth swipe dampeners
       swipeRotationVelocityY.current *= 0.95;
 
-      // Smooth rotate calculations
-      if (currentPinch) {
-        currentRotationX.current += (targetRotationX.current - currentRotationX.current) * easing;
-        currentRotationY.current += (targetRotationY.current - currentRotationY.current) * easing + swipeRotationVelocityY.current;
+      // Friction factor for organic inertia damping
+      const friction = 0.965;
+
+      // Smooth rotate calculations with velocity and friction damping
+      if (activePinch && !activeFist) {
+        // Human palm is active and driving rotation: drift torque depends on finger offset from center
+        const dx = activePinch.x - 0.5;
+        const dy = activePinch.y - 0.5;
+        const forceFactor = 0.005;
+
+        // Spin velocity accelerates gracefully
+        rotationVelocityY.current += dx * forceFactor;
+        rotationVelocityX.current += dy * forceFactor;
+
+        // Apply friction damping to contain speed
+        rotationVelocityY.current *= friction;
+        rotationVelocityX.current *= friction;
+      } else if (activeFist) {
+        // Fist clenched functions as an active magnetic brake to lock the rotation
+        rotationVelocityX.current *= 0.82;
+        rotationVelocityY.current *= 0.82;
       } else {
-        // Floating idle spin parameters
-        currentRotationX.current += rotationSpeed.current * 0.3;
-        currentRotationY.current += rotationSpeed.current + swipeRotationVelocityY.current;
+        // Decay manual spin speeds down to standard baseline automatic background idle spin
+        const targetIdleXVel = rotationSpeed.current * 0.3;
+        const targetIdleYVel = rotationSpeed.current + swipeRotationVelocityY.current;
+
+        rotationVelocityX.current += (targetIdleXVel - rotationVelocityX.current) * 0.035;
+        rotationVelocityY.current += (targetIdleYVel - rotationVelocityY.current) * 0.035;
       }
+
+      // Apply cumulative velocity vector to update sphere rotation angles
+      currentRotationX.current += rotationVelocityX.current;
+      currentRotationY.current += rotationVelocityY.current;
 
       const centerX = canvas.width * centroidX.current;
       const centerY = canvas.height * centroidY.current;
 
-      // Draw active coordinates laser indicator on PINCH action
-      if (currentPinch) {
-        drawLaserPointer(ctx, centerX, centerY, canvas.width, canvas.height);
+      // Draw active coordinates laser indicator on clenches
+      if (activePinch) {
+        drawLaserPointer(ctx, centerX, centerY, canvas.width, canvas.height, !!activeFist);
       }
 
-      // Draw particle cluster structure 3D projected onto 2D canvas
+      // Draw particle cluster structure projected globally
       ctx.save();
       ctx.translate(centerX, centerY);
 
@@ -183,57 +291,53 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
       const timeSecStr = Date.now() / 1000;
       const breatheScale = (collapseFactor.current) * (1 + Math.sin(timeSecStr * 4.0) * 0.04);
 
-      // Draw standard inner energy core glowing ring
-      ctx.shadowColor = isFistActive ? '#ec4899' : '#06b6d4';
-      ctx.shadowBlur = isFistActive ? 30 : 15;
+      // Draw glowing background visual ring
+      ctx.shadowColor = activeFist ? '#ec4899' : '#06b6d4';
+      ctx.shadowBlur = activeFist ? 35 : 15;
       ctx.beginPath();
-      ctx.arc(0, 0, 45 * breatheScale, 0, Math.PI * 2);
-      ctx.fillStyle = isFistActive 
-        ? 'rgba(236, 72, 153, 0.15)' 
-        : 'rgba(34, 211, 238, 0.05)';
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = isFistActive ? '#ec4899' : '#06b6d4';
+      ctx.arc(0, 0, 48 * breatheScale, 0, Math.PI * 2);
+      ctx.fillStyle = activeFist 
+        ? 'rgba(236, 72, 153, 0.18)' 
+        : 'rgba(34, 211, 238, 0.06)';
+      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = activeFist ? '#ec4899' : '#06b6d4';
       ctx.stroke();
       ctx.fill();
 
       // Render 3D Hologram point network
       particles.current.forEach((p) => {
-        // 1. Rotate in 3D matrix space
-        // Rot X
+        // Evaluate rotation matrix coordinates
         const cosX = Math.cos(currentRotationX.current);
         const sinX = Math.sin(currentRotationX.current);
         let y1 = p.oy * cosX - p.oz * sinX;
         let z1 = p.oy * sinX + p.oz * cosX;
 
-        // Rot Y
         const cosY = Math.cos(currentRotationY.current);
         const sinY = Math.sin(currentRotationY.current);
         let x2 = p.ox * cosY + z1 * sinY;
         let z2 = -p.ox * sinY + z1 * cosY;
 
-        // 2. Adjust with collapse factors
+        // Apply dynamic scale
         const finalX = x2 * breatheScale;
         const finalY = y1 * breatheScale;
         const finalZ = z2 * breatheScale;
 
-        // Perspective projection calculation
+        // Perspective 3D transformation
         const perspective = 300 / (300 + finalZ);
         const px = finalX * perspective;
         const py = finalY * perspective;
 
-        // Don't render clip out specs
         if (perspective < 0.2) return;
 
         ctx.fillStyle = p.color;
-        // Increase visual particle sizing depending on projection camera layers
-        const computedSize = Math.max(0.5, p.size * perspective * (isFistActive ? 0.4 : 1));
+        const computedSize = Math.max(0.5, p.size * perspective * (activeFist ? 0.35 : 1.0));
         
         ctx.beginPath();
         ctx.arc(px, py, computedSize, 0, Math.PI * 2);
         ctx.fill();
 
-        // Beautiful connecting matrix lines for adjacent points
-        if (Math.random() < 0.015 && !isFistActive) {
+        // Aesthetic network connection vectors
+        if (Math.random() < 0.015 && !activeFist) {
           ctx.strokeStyle = 'rgba(6, 182, 212, 0.12)';
           ctx.lineWidth = 0.5;
           ctx.beginPath();
@@ -243,27 +347,95 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
         }
       });
 
-      // Render shockwave pulse ring on FIST release
+      // Release Shockwave Ring
       if (explosionPulse.current > 0) {
         ctx.shadowColor = '#f43f5e';
         ctx.shadowBlur = 40;
         ctx.strokeStyle = `rgba(244, 63, 94, ${explosionPulse.current})`;
         ctx.lineWidth = 4 * explosionPulse.current;
         ctx.beginPath();
-        // Expanding ring outwards
         ctx.arc(0, 0, (1.0 - explosionPulse.current) * 320, 0, Math.PI * 2);
         ctx.stroke();
       }
 
       ctx.restore();
 
-      // Render beautiful lateral sweep energy lines for SWIPE trigger
+      // OVERLAY GORGEOUS HAND LANDMARK skeleton directly on top of the 3D canvas viewport
+      if (activePinch) {
+        let joints: { x: number; y: number; z: number }[] = [];
+        if (activeLandmarks && activeLandmarks.length === 21) {
+          joints = activeLandmarks;
+        } else {
+          // Generate realistic procedural animated tracker skeleton when in simulator mode
+          joints = generateProceduralHand(activePinch.x, activePinch.y, !!activeFist);
+        }
+
+        if (joints && joints.length === 21) {
+          const paths = [
+            [0, 1, 2, 3, 4],     // Thumb
+            [5, 6, 7, 8],        // Index
+            [9, 10, 11, 12],     // Middle
+            [13, 14, 15, 16],    // Ring
+            [17, 18, 19, 20],    // Pinky
+            [0, 5, 9, 13, 17, 0] // Palm base connection loop
+          ];
+
+          ctx.save();
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = activeFist ? '#ec4899' : '#06b6d4';
+          ctx.strokeStyle = activeFist ? 'rgba(236, 72, 153, 0.65)' : 'rgba(34, 211, 238, 0.55)';
+          ctx.lineWidth = 3.0;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+
+          // Render connecting cyber-lines
+          paths.forEach(path => {
+            ctx.beginPath();
+            for (let i = 0; i < path.length; i++) {
+              const pt = joints[path[i]];
+              if (pt) {
+                const jx = pt.x * canvas.width;
+                const jy = pt.y * canvas.height;
+                if (i === 0) {
+                  ctx.moveTo(jx, jy);
+                } else {
+                  ctx.lineTo(jx, jy);
+                }
+              }
+            }
+            ctx.stroke();
+          });
+
+          // Draw joint connector neon nodes
+          ctx.shadowBlur = 0;
+          for (let i = 0; i < joints.length; i++) {
+            const pt = joints[i];
+            if (pt) {
+              const jx = pt.x * canvas.width;
+              const jy = pt.y * canvas.height;
+              const isFingerTip = [4, 8, 12, 16, 20].indexOf(i) !== -1;
+
+              ctx.beginPath();
+              const sizeRad = isFingerTip ? 4.5 : 2.5;
+              ctx.arc(jx, jy, sizeRad, 0, 2 * Math.PI);
+              ctx.fillStyle = isFingerTip ? '#ec4899' : '#22d3ee';
+              ctx.fill();
+              ctx.strokeStyle = '#ffffff';
+              ctx.lineWidth = 1;
+              ctx.stroke();
+            }
+          }
+          ctx.restore();
+        }
+      }
+
+      // Render Swipe visual transitions
       if (activeSwipe.current !== null) {
         drawSwipeVisuals(ctx, canvas.width, canvas.height);
       }
 
-      // Cinematic terminal warnings during clenching transitions
-      if (isFistActive) {
+      // Cinematic terminal indicators
+      if (activeFist) {
         ctx.font = 'bold 12px "JetBrains Mono", monospace';
         ctx.fillStyle = '#ec4899';
         ctx.shadowBlur = 0;
@@ -277,8 +449,6 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
 
       // Display HUD details
       drawHUDTelemetry(ctx, canvas.width, canvas.height);
-
-      animationRef.current = requestAnimationFrame(render);
     };
 
     const drawGrid = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
@@ -289,14 +459,13 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
       const gridW = w * 1.8;
       const lineCount = 20;
 
-      // Draw fading cyan/pink grid perspective
+      // Draw fading purple perspective grid
       const gradient = ctx.createLinearGradient(w / 2, horizonY, w / 2, h);
       gradient.addColorStop(0, 'rgba(147, 51, 234, 0.05)');
       gradient.addColorStop(0.5, 'rgba(6, 182, 212, 0.07)');
       gradient.addColorStop(1, 'rgba(236, 72, 153, 0.18)');
       ctx.strokeStyle = gradient;
 
-      // Draw prospective diagonal lines starting from a single vanishing dot
       for (let i = 0; i <= lineCount; i++) {
         const xPos = (w / 2) - (gridW / 2) + (gridW * (i / lineCount));
         ctx.beginPath();
@@ -305,11 +474,9 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
         ctx.stroke();
       }
 
-      // Draw horizontal vanishing lines pacing down with perspective depth spacing
       let gridCount = 12;
       for (let i = 0; i < gridCount; i++) {
         const ratio = i / gridCount;
-        // Exponential spacing for deep depth feeling
         const gridY = horizonY + (h - horizonY) * Math.pow(ratio, 2.5);
         ctx.beginPath();
         ctx.moveTo(0, gridY);
@@ -319,39 +486,37 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
       ctx.restore();
     };
 
-    const drawLaserPointer = (ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, h: number) => {
+    const drawLaserPointer = (ctx: CanvasRenderingContext2D, cx: number, cy: number, w: number, h: number, clenching: boolean) => {
       ctx.save();
-      // Target Reticle Box
-      ctx.shadowColor = '#06b6d4';
+      ctx.shadowColor = clenching ? '#ec4899' : '#06b6d4';
       ctx.shadowBlur = 10;
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.8)';
+      ctx.strokeStyle = clenching ? 'rgba(236, 72, 153, 0.7)' : 'rgba(6, 182, 212, 0.8)';
       ctx.lineWidth = 1.5;
 
       const size = 18;
-      // Crosshair brackets
       ctx.strokeRect(cx - size / 2, cy - size / 2, size, size);
 
       ctx.beginPath();
-      // Horizontal laser line
       ctx.moveTo(10, cy); ctx.lineTo(cx - size, cy);
       ctx.moveTo(cx + size, cy); ctx.lineTo(w - 10, cy);
-      // Vertical laser line
       ctx.moveTo(cx, 10); ctx.lineTo(cx, cy - size);
       ctx.moveTo(cx, cy + size); ctx.lineTo(cx, h - 10);
-      ctx.strokeStyle = 'rgba(6, 182, 212, 0.15)';
+      ctx.strokeStyle = clenching ? 'rgba(236, 72, 153, 0.15)' : 'rgba(6, 182, 212, 0.15)';
       ctx.stroke();
 
-      // Mini text coordinates tag
       ctx.shadowBlur = 0;
-      ctx.fillStyle = '#06b6d4';
+      ctx.fillStyle = clenching ? '#ec4899' : '#06b6d4';
       ctx.font = '10px "JetBrains Mono", monospace';
-      ctx.fillText(`PINCH_NODE_LOCKED::[${(cx/w).toFixed(3)}, ${(cy/h).toFixed(3)}]`, cx + 15, cy - 10);
+      ctx.fillText(
+        clenching ? `FIST_COLLAPSE_DRAG::[${(cx/w).toFixed(3)}, ${(cy/h).toFixed(3)}]` : `TRACK_TARGET_LOCK::[${(cx/w).toFixed(3)}, ${(cy/h).toFixed(3)}]`, 
+        cx + 15, 
+        cy - 10
+      );
       ctx.restore();
     };
 
     const drawSwipeVisuals = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
       ctx.save();
-      // Shift coordinate position
       const transitionRate = 0.08;
       
       if (activeSwipe.current === 'LEFT') {
@@ -369,7 +534,6 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
       if (activeSwipe.current !== null) {
         const xPos = w * swipePosition.current;
 
-        // Draw multiple layered neon energy spikes
         ctx.shadowColor = '#d946ef';
         ctx.shadowBlur = 25;
         ctx.fillStyle = 'rgba(217, 70, 239, 0.15)';
@@ -399,30 +563,24 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
       ctx.fillStyle = 'rgba(168, 85, 247, 0.7)';
       ctx.font = '10px "JetBrains Mono", monospace';
 
-      // Draw decorative screen bounds telemetry markings
       ctx.fillText('SYNAPTIC_GRID_PERSPECTIVE_MATRIX', 20, 30);
       ctx.fillText('HOLO_STATION_ROTATIVE', w - 180, 30);
 
-      // Simple visual framing corners
       ctx.strokeStyle = 'rgba(168, 85, 247, 0.3)';
       ctx.lineWidth = 1;
       
-      // Top Left Corner
       ctx.beginPath();
       ctx.moveTo(15, 45); ctx.lineTo(15, 15); ctx.lineTo(45, 15);
       ctx.stroke();
 
-      // Top Right Corner
       ctx.beginPath();
       ctx.moveTo(w - 15, 45); ctx.lineTo(w - 15, 15); ctx.lineTo(w - 45, 15);
       ctx.stroke();
 
-      // Bottom Left Corner
       ctx.beginPath();
       ctx.moveTo(15, h - 45); ctx.lineTo(15, h - 15); ctx.lineTo(45, h - 15);
       ctx.stroke();
 
-      // Bottom Right Corner
       ctx.beginPath();
       ctx.moveTo(w - 15, h - 45); ctx.lineTo(w - 15, h - 15); ctx.lineTo(w - 45, h - 15);
       ctx.stroke();
@@ -430,7 +588,6 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
       ctx.restore();
     };
 
-    // Run animation frames
     render();
 
     return () => {
@@ -439,11 +596,10 @@ export default function HologramCanvas({ currentPinch, isFistActive, lastSwipe }
       }
       window.removeEventListener('resize', handleResize);
     };
-  }, [isFistActive]);
+  }, []); // Run continuous rendering frame rate on empty dependency to match game engines loop style
 
   return (
     <div className="w-full h-full relative" id="hologram-viewport">
-      {/* Visual neon border */}
       <div className="absolute inset-0 border border-cyan-500/30 rounded-xl pointer-events-none shadow-[inset_0_0_15px_rgba(34,211,238,0.1)]" />
       <canvas 
         ref={canvasRef} 

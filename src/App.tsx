@@ -9,6 +9,7 @@ import HologramCanvas from './components/HologramCanvas';
 import TerminalLog from './components/TerminalLog';
 import PythonScriptViewer from './components/PythonScriptViewer';
 import WebcamTracker from './components/WebcamTracker';
+import InstructionModal from './components/InstructionModal';
 import { GestureEvent, GestureEventType } from './types';
 import { pythonScriptContent } from './pythonCode';
 
@@ -17,11 +18,13 @@ export default function App() {
   const [logsPaused, setLogsPaused] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
   const [activeSource, setActiveSource] = useState<'socket' | 'browser' | 'simulator'>('simulator');
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   
   // Hand tracking coordinate states
   const [currentPinch, setCurrentPinch] = useState<{ x: number; y: number } | null>(null);
   const [isFistActive, setIsFistActive] = useState(false);
   const [lastSwipe, setLastSwipe] = useState<{ direction: 'SWIPE_LEFT' | 'SWIPE_RIGHT'; timestamp: number } | null>(null);
+  const [currentLandmarks, setCurrentLandmarks] = useState<{ x: number; y: number; z: number }[] | null>(null);
 
   // FPS ticker states
   const [fps, setFps] = useState(0);
@@ -61,9 +64,24 @@ export default function App() {
 
   // Convert raw stream events to active visual feedback triggers
   const processGestureState = (event: Omit<GestureEvent, 'id' | 'timestamp'>) => {
+    if (event.landmarks) {
+      setCurrentLandmarks(event.landmarks);
+    } else if (event.event === 'PINCH_END' || event.event === 'FIST_END') {
+      setCurrentLandmarks(null);
+    }
+
     switch (event.event) {
       case 'FIST_START':
         setIsFistActive(true);
+        if (event.x !== undefined && event.y !== undefined) {
+          setCurrentPinch({ x: event.x, y: event.y });
+        }
+        break;
+      case 'FIST_MOVE':
+        setIsFistActive(true);
+        if (event.x !== undefined && event.y !== undefined) {
+          setCurrentPinch({ x: event.x, y: event.y });
+        }
         break;
       case 'FIST_END':
         setIsFistActive(false);
@@ -148,6 +166,14 @@ export default function App() {
   };
 
   useEffect(() => {
+    const hasLaunched = localStorage.getItem('hologram_first_launch');
+    if (!hasLaunched) {
+      setIsHelpOpen(true);
+      localStorage.setItem('hologram_first_launch', 'true');
+    }
+  }, []);
+
+  useEffect(() => {
     connectWebSocket();
 
     // Start FPS calculations
@@ -191,6 +217,13 @@ export default function App() {
         connectionStatus={connectionStatus} 
         activeSource={activeSource} 
         fps={fps} 
+        onHelpClick={() => setIsHelpOpen(true)}
+      />
+
+      {/* Cyberdeck tutorial interactive overlay */}
+      <InstructionModal 
+        isOpen={isHelpOpen} 
+        onClose={() => setIsHelpOpen(false)} 
       />
 
       {/* Bento grid workspace layout */}
@@ -203,6 +236,7 @@ export default function App() {
               currentPinch={currentPinch} 
               isFistActive={isFistActive} 
               lastSwipe={lastSwipe} 
+              currentLandmarks={currentLandmarks}
             />
           </div>
 

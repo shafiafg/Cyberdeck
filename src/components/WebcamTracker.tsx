@@ -21,6 +21,7 @@ export default function WebcamTracker({
   isFistActive
 }: WebcamTrackerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cameraActive, setCameraActive] = useState(false);
   const [loadingMediaPipe, setLoadingMediaPipe] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -171,7 +172,7 @@ export default function WebcamTracker({
 
     hands.setOptions({
       maxNumHands: 1,
-      modelComplexity: 1,
+      modelComplexity: 0, // Lower complexity model (0) for significantly higher frame-rates
       minDetectionConfidence: 0.65,
       minTrackingConfidence: 0.65
     });
@@ -181,6 +182,71 @@ export default function WebcamTracker({
 
     // Local state calculation for Fist and Pinch inside browser webcam frame rates
     hands.onResults((results: any) => {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          if (videoRef.current && videoRef.current.videoWidth) {
+            if (canvas.width !== videoRef.current.videoWidth || canvas.height !== videoRef.current.videoHeight) {
+              canvas.width = videoRef.current.videoWidth;
+              canvas.height = videoRef.current.videoHeight;
+            }
+          }
+
+          if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const landmarks = results.multiHandLandmarks[0];
+            const w = canvas.width;
+            const h = canvas.height;
+
+            const paths = [
+              [0, 1, 2, 3, 4],     // Thumb
+              [5, 6, 7, 8],        // Index
+              [9, 10, 11, 12],     // Middle
+              [13, 14, 15, 16],    // Ring
+              [17, 18, 19, 20],    // Pinky
+              [0, 5, 9, 13, 17, 0] // Palm / base outline
+            ];
+
+            // Render joint skeleton lines
+            ctx.shadowColor = '#06b6d4';
+            ctx.shadowBlur = 4;
+            ctx.strokeStyle = 'rgba(6, 182, 212, 0.85)'; // Neon Cyan 
+            ctx.lineWidth = 3.5;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            paths.forEach(path => {
+              ctx.beginPath();
+              for (let i = 0; i < path.length; i++) {
+                const pt = landmarks[path[i]];
+                if (i === 0) {
+                  ctx.moveTo(pt.x * w, pt.y * h);
+                } else {
+                  ctx.lineTo(pt.x * w, pt.y * h);
+                }
+              }
+              ctx.stroke();
+            });
+
+            // Clean-up shadow and draw joint connectors
+            ctx.shadowBlur = 0;
+            for (let i = 0; i < landmarks.length; i++) {
+              const pt = landmarks[i];
+              ctx.beginPath();
+              ctx.arc(pt.x * w, pt.y * h, 4.5, 0, 2 * Math.PI);
+              
+              const isFingerTip = [4, 8, 12, 16, 20].indexOf(i) !== -1;
+              ctx.fillStyle = isFingerTip ? '#ec4899' : '#a855f7'; // Neon pink for fingertips, purple for joints
+              ctx.fill();
+              ctx.strokeStyle = '#ffffff';
+              ctx.lineWidth = 1.2;
+              ctx.stroke();
+            }
+          }
+        }
+      }
+
       if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
         const landmarks = results.multiHandLandmarks[0];
         
@@ -206,14 +272,43 @@ export default function WebcamTracker({
         ];
         const avgDist = distances.reduce((a, b) => a + b, 0) / distances.length;
 
+        const fst = landmarks[9]; // Middle finger MCP is an ultra-stable palm center coordinate
+        const fx = 1.0 - fst.x; // scale-x flipped
+        const fy = fst.y;
+
+        const mappedLandmarks = landmarks.map((l: any) => ({
+          x: 1.0 - l.x,
+          y: l.y,
+          z: l.z || 0
+        }));
+
         // Trigger events upstream
         if (avgDist < 0.22) {
+          if (localPinchActive) {
+            localPinchActive = false;
+            onGestureDetected({
+              event: 'PINCH_END',
+              source: 'browser'
+            });
+          }
           if (!localFistActive) {
             localFistActive = true;
             onGestureDetected({
               event: 'FIST_START',
+              x: Math.max(0.0, Math.min(1.0, fx)),
+              y: Math.max(0.0, Math.min(1.0, fy)),
               details: `Browser tracking clench! Avg ratio: ${avgDist.toFixed(3)}`,
-              source: 'browser'
+              source: 'browser',
+              landmarks: mappedLandmarks
+            });
+          } else {
+            // Stream continuous drag movement coordinates while fist is clenched
+            onGestureDetected({
+              event: 'FIST_MOVE',
+              x: Math.max(0.0, Math.min(1.0, fx)),
+              y: Math.max(0.0, Math.min(1.0, fy)),
+              source: 'browser',
+              landmarks: mappedLandmarks
             });
           }
         } else {
@@ -225,30 +320,36 @@ export default function WebcamTracker({
               source: 'browser'
             });
           }
-        }
 
-        // 2. Check Pinch
-        const pinchDist = calculateDist(index_tip, thumb_tip);
-        if (pinchDist < 0.06) {
-          const cx = 1.0 - (index_tip.x + thumb_tip.x) / 2.0; // mirror coordinates
-          const cy = (index_tip.y + thumb_tip.y) / 2.0;
+          // 2. Track loose palm (when not clenched as fist)
+          const cx = Math.max(0.0, Math.min(1.0, fx));
+          const cy = Math.max(0.0, Math.min(1.0, fy));
           const status = localPinchActive ? 'PINCH_MOVE' : 'PINCH_START';
           localPinchActive = true;
-          
+
           onGestureDetected({
             event: status,
-            x: Math.max(0.0, Math.min(1.0, cx)),
-            y: Math.max(0.0, Math.min(1.0, cy)),
+            x: cx,
+            y: cy,
+            source: 'browser',
+            landmarks: mappedLandmarks
+          });
+        }
+      } else {
+        // Handle case when no hands are visible in the camera feed: cleanly reset states
+        if (localFistActive) {
+          localFistActive = false;
+          onGestureDetected({
+            event: 'FIST_END',
             source: 'browser'
           });
-        } else {
-          if (localPinchActive) {
-            localPinchActive = false;
-            onGestureDetected({
-              event: 'PINCH_END',
-              source: 'browser'
-            });
-          }
+        }
+        if (localPinchActive) {
+          localPinchActive = false;
+          onGestureDetected({
+            event: 'PINCH_END',
+            source: 'browser'
+          });
         }
       }
     });
@@ -279,7 +380,7 @@ export default function WebcamTracker({
     setActiveSource('simulator');
 
     onGestureDetected({
-      event: 'PINCH_START',
+      event: isFistActive ? 'FIST_START' : 'PINCH_START',
       x, y,
       source: 'simulator'
     });
@@ -296,7 +397,7 @@ export default function WebcamTracker({
     setSimY(y);
 
     onGestureDetected({
-      event: 'PINCH_MOVE',
+      event: isFistActive ? 'FIST_MOVE' : 'PINCH_MOVE',
       x, y,
       source: 'simulator'
     });
@@ -306,7 +407,7 @@ export default function WebcamTracker({
     if (simulatorDown) {
       setSimulatorDown(false);
       onGestureDetected({
-        event: 'PINCH_END',
+        event: isFistActive ? 'FIST_END' : 'PINCH_END',
         source: 'simulator'
       });
     }
@@ -388,19 +489,21 @@ export default function WebcamTracker({
         </div>
 
         {/* Video feed container or status */}
-        <div className="relative h-[150px] bg-black/60 border border-purple-950 rounded-lg flex items-center justify-center overflow-hidden">
+        <div className="relative h-[150px] bg-black/60 border border-purple-950 rounded-lg flex items-center justify-center overflow-hidden font-mono">
+          <video 
+            ref={videoRef} 
+            className={`w-full h-full object-cover scale-x-[-1] ${cameraActive ? 'block' : 'hidden'}`} 
+            playsInline 
+            muted
+          />
+          <canvas
+            ref={canvasRef}
+            className={`absolute inset-0 w-full h-full object-cover scale-x-[-1] pointer-events-none ${cameraActive ? 'block' : 'hidden'}`}
+          />
           {cameraActive ? (
-            <>
-              <video 
-                ref={videoRef} 
-                className="w-full h-full object-cover scale-x-[-1]" 
-                playsInline 
-                muted
-              />
-              <div className="absolute top-2 left-2 bg-black/70 border border-cyan-500/30 px-1.5 py-0.5 rounded text-[8px] font-mono text-cyan-400 select-none animate-pulse">
-                • BROWSER_SENSING_LIVE
-              </div>
-            </>
+            <div className="absolute top-2 left-2 bg-black/70 border border-cyan-500/30 px-1.5 py-0.5 rounded text-[8px] font-mono text-cyan-400 select-none animate-pulse">
+              • BROWSER_SENSING_LIVE
+            </div>
           ) : (
             <div className="text-center p-4 flex flex-col items-center">
               <CameraOff className="w-7 h-7 text-purple-600/50 mb-1" />

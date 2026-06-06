@@ -179,12 +179,27 @@ class GestureDetector:
         ]
         avg_finger_distance = sum(distances) / len(distances)
 
+        # Get stable coordinates from landmark 9 (Middle MCP) representing hand center
+        palm_center = landmarks.landmark[9]
+        fx = 1.0 - palm_center.x if CONFIG["MIRROR_VIDEO"] else palm_center.x
+        fy = palm_center.y
+        fx = max(0.0, min(1.0, fx))
+        fy = max(0.0, min(1.0, fy))
+
         if avg_finger_distance < CONFIG["FIST_THRESHOLD"]:
             if not self.fist_active:
                 self.fist_active = True
                 events.append({
                     "event": "FIST_START",
+                    "x": round(fx, 4),
+                    "y": round(fy, 4),
                     "details": f"All fingers curled tight! Average distance ratio: {avg_finger_distance:.3f}"
+                })
+            else:
+                events.append({
+                    "event": "FIST_MOVE",
+                    "x": round(fx, 4),
+                    "y": round(fy, 4)
                 })
         else:
             if self.fist_active:
@@ -194,39 +209,40 @@ class GestureDetector:
                     "details": f"Fist unclenched. Release ratio: {avg_finger_distance:.3f}"
                 })
 
-        # 2. GESTURE: PINCH DETECTOR
-        pinch_distance = self.calculate_distance(index_tip, thumb_tip)
-        
-        if pinch_distance < CONFIG["PINCH_THRESHOLD"]:
-            centroid_x = (index_tip.x + thumb_tip.x) / 2.0
-            centroid_y = (index_tip.y + thumb_tip.y) / 2.0
+        # 2. GESTURE: PINCH DETECTOR (skip if fist clench is active)
+        if not self.fist_active:
+            pinch_distance = self.calculate_distance(index_tip, thumb_tip)
             
-            alpha = CONFIG["SMOOTHING_FACTOR"]
-            self.smoothed_pinch_x = (alpha * centroid_x) + ((1.0 - alpha) * self.smoothed_pinch_x)
-            self.smoothed_pinch_y = (alpha * centroid_y) + ((1.0 - alpha) * self.smoothed_pinch_y)
+            if pinch_distance < CONFIG["PINCH_THRESHOLD"]:
+                centroid_x = (index_tip.x + thumb_tip.x) / 2.0
+                centroid_y = (index_tip.y + thumb_tip.y) / 2.0
+                
+                alpha = CONFIG["SMOOTHING_FACTOR"]
+                self.smoothed_pinch_x = (alpha * centroid_x) + ((1.0 - alpha) * self.smoothed_pinch_x)
+                self.smoothed_pinch_y = (alpha * centroid_y) + ((1.0 - alpha) * self.smoothed_pinch_y)
 
-            tx = 1.0 - self.smoothed_pinch_x if CONFIG["MIRROR_VIDEO"] else self.smoothed_pinch_x
-            ty = self.smoothed_pinch_y
+                tx = 1.0 - self.smoothed_pinch_x if CONFIG["MIRROR_VIDEO"] else self.smoothed_pinch_x
+                ty = self.smoothed_pinch_y
 
-            tx = max(0.0, min(1.0, tx))
-            ty = max(0.0, min(1.0, ty))
+                tx = max(0.0, min(1.0, tx))
+                ty = max(0.0, min(1.0, ty))
 
-            state_desc = "PINCH_MOVE" if self.pinch_active else "PINCH_START"
-            self.pinch_active = True
-            
-            events.append({
-                "event": state_desc,
-                "x": round(tx, 4),
-                "y": round(ty, 4),
-                "raw_distance": round(pinch_distance, 4)
-            })
-        else:
-            if self.pinch_active:
-                self.pinch_active = False
+                state_desc = "PINCH_MOVE" if self.pinch_active else "PINCH_START"
+                self.pinch_active = True
+                
                 events.append({
-                    "event": "PINCH_END",
+                    "event": state_desc,
+                    "x": round(tx, 4),
+                    "y": round(ty, 4),
                     "raw_distance": round(pinch_distance, 4)
                 })
+            else:
+                if self.pinch_active:
+                    self.pinch_active = False
+                    events.append({
+                        "event": "PINCH_END",
+                        "raw_distance": round(pinch_distance, 4)
+                    })
 
         # 3. GESTURE: SWIPE DETECTOR
         if self.prev_wrist_x is not None:
@@ -321,13 +337,19 @@ async def main_simulation_loop(broadcaster):
             target_x = 0.5 + 0.3 * math.sin(t_coord)
             target_y = 0.5 + 0.2 * math.sin(t_coord * 1.8)
 
-            # 1. Handle PINCH state (90% of duration simulates continuous pinch drag moves)
+            # 1. Handle PINCH state or FIST dragging coordinates following trajectory curves
             if not sim_fist_active:
                 events_to_send.append({
                     "event": "PINCH_MOVE",
                     "x": round(target_x, 4),
                     "y": round(target_y, 4),
                     "raw_distance": round(0.01 + 0.02 * math.cos(t_coord * 0.4), 4)
+                })
+            else:
+                events_to_send.append({
+                    "event": "FIST_MOVE",
+                    "x": round(target_x, 4),
+                    "y": round(target_y, 4)
                 })
 
             # 2. Periodic periodic FIST actions
@@ -336,6 +358,8 @@ async def main_simulation_loop(broadcaster):
                 if sim_fist_active:
                     events_to_send.append({
                         "event": "FIST_START",
+                        "x": round(target_x, 4),
+                        "y": round(target_y, 4),
                         "details": "Simulated organic fist clench started."
                     })
                     # Keep fist closed for 1.8 seconds

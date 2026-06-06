@@ -6,6 +6,7 @@
 export type GestureEventType = 
   | 'VIBE_READY'
   | 'FIST_START'
+  | 'FIST_MOVE'
   | 'FIST_END'
   | 'PINCH_START'
   | 'PINCH_MOVE'
@@ -25,6 +26,7 @@ export interface GestureEvent {
   intensity?: number;
   details?: string;
   source: 'socket' | 'browser' | 'simulator';
+  landmarks?: { x: number; y: number; z: number }[];
 }
 
 export interface EngineConfig {

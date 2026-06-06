@@ -4,15 +4,16 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Cpu, Wifi, Radio, Clock, Anchor, Terminal } from 'lucide-react';
+import { Cpu, Wifi, Radio, Clock, Anchor, Terminal, HelpCircle, Loader2, WifiOff } from 'lucide-react';
 
 interface CyberdeckHeaderProps {
   connectionStatus: 'connected' | 'disconnected' | 'connecting';
   activeSource: 'socket' | 'browser' | 'simulator';
   fps: number;
+  onHelpClick?: () => void;
 }
 
-export default function CyberdeckHeader({ connectionStatus, activeSource, fps }: CyberdeckHeaderProps) {
+export default function CyberdeckHeader({ connectionStatus, activeSource, fps, onHelpClick }: CyberdeckHeaderProps) {
   const [systemTime, setSystemTime] = useState('');
   const [latency, setLatency] = useState(0);
 
@@ -35,14 +36,6 @@ export default function CyberdeckHeader({ connectionStatus, activeSource, fps }:
       setLatency(0);
     }
   }, [connectionStatus]);
-
-  const getStatusColor = () => {
-    switch (connectionStatus) {
-      case 'connected': return 'text-emerald-400 border-emerald-500 bg-emerald-950/30';
-      case 'connecting': return 'text-amber-400 border-amber-500 bg-amber-950/30';
-      default: return 'text-rose-500 border-rose-500/50 bg-rose-950/20';
-    }
-  };
 
   return (
     <header className="border-b border-purple-500/30 bg-[#090514]/90 px-6 py-4 backdrop-blur-md relative overflow-hidden" id="deck-header">
@@ -94,16 +87,40 @@ export default function CyberdeckHeader({ connectionStatus, activeSource, fps }:
           </div>
         </div>
 
-        {/* Right - Live connection status */}
-        <div className="flex items-center gap-3">
-          <div className={`flex items-center gap-2.5 px-4 py-2 rounded border font-mono text-xs font-bold transition-all duration-300 shadow-[0_0_15px_rgba(34,211,238,0.05)] ${getStatusColor()}`}>
-            <Wifi className={`w-4 h-4 ${connectionStatus === 'connected' ? 'animate-pulse' : ''}`} />
-            <span className="tracking-wider">
-              {connectionStatus === 'connected' && 'SOCKET_CONNECTED - 8765'}
-              {connectionStatus === 'connecting' && 'AWAITING_CORE_VIBE_SOCKET...'}
-              {connectionStatus === 'disconnected' && 'WEBSOCKET_OFFLINE'}
-            </span>
-          </div>
+        {/* Right - Live connection status & guide help */}
+        <div className="flex items-center gap-3 animate-fade-in">
+          {onHelpClick && (
+            <button
+              onClick={onHelpClick}
+              className="px-3 py-2 border border-purple-500/30 hover:border-purple-400 bg-purple-950/30 hover:bg-purple-950/60 text-purple-300 hover:text-cyan-400 rounded-md transition-all flex items-center justify-center gap-2 font-mono text-xs cursor-pointer shadow-[0_0_10px_rgba(168,85,247,0.1)] group/btn"
+              title="Open Synaptic Uplink Guide"
+              id="header-help-guide-btn"
+            >
+              <HelpCircle className="w-4 h-4 text-purple-400 group-hover/btn:text-cyan-400" />
+              <span>GUIDE</span>
+            </button>
+          )}
+
+          {connectionStatus === 'connected' && (
+            <div className="flex items-center gap-2 px-2.5 py-1 rounded border border-emerald-500/80 bg-emerald-950/25 font-mono text-[10px] sm:text-xs font-semibold text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.15)]">
+              <Wifi className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+              <span className="tracking-wider uppercase">SOCKET::CONNECTED [8765]</span>
+            </div>
+          )}
+
+          {connectionStatus === 'connecting' && (
+            <div className="flex items-center gap-2 px-2.5 py-1 rounded border border-amber-500/60 bg-amber-950/20 border-dashed font-mono text-[10px] sm:text-xs font-semibold text-amber-400 animate-pulse">
+              <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+              <span className="tracking-wider uppercase">WAITING::CORE_SOCKET</span>
+            </div>
+          )}
+
+          {connectionStatus === 'disconnected' && (
+            <div className="flex items-center gap-2 px-2.5 py-1 rounded border border-rose-500/30 bg-rose-950/15 font-mono text-[10px] sm:text-xs font-semibold text-rose-300">
+              <WifiOff className="w-3.5 h-3.5 text-rose-400/80" />
+              <span className="tracking-wider uppercase">SOCKET::OFFLINE</span>
+            </div>
+          )}
         </div>
       </div>
     </header>

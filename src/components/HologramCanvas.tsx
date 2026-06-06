@@ -10,6 +10,7 @@ interface HologramCanvasProps {
   isFistActive: boolean;
   lastSwipe: { direction: 'SWIPE_LEFT' | 'SWIPE_RIGHT'; timestamp: number } | null;
   currentLandmarks?: { x: number; y: number; z: number }[] | null;
+  showHandSkeleton?: boolean;
 }
 
 interface Particle {
@@ -70,7 +71,8 @@ export default function HologramCanvas({
   currentPinch, 
   isFistActive, 
   lastSwipe,
-  currentLandmarks
+  currentLandmarks,
+  showHandSkeleton = true
 }: HologramCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number | null>(null);
@@ -80,12 +82,14 @@ export default function HologramCanvas({
   const currentPinchRef = useRef(currentPinch);
   const isFistActiveRef = useRef(isFistActive);
   const currentLandmarksRef = useRef(currentLandmarks);
+  const showHandSkeletonRef = useRef(showHandSkeleton);
   
   useEffect(() => {
     currentPinchRef.current = currentPinch;
     isFistActiveRef.current = isFistActive;
     currentLandmarksRef.current = currentLandmarks;
-  }, [currentPinch, isFistActive, currentLandmarks]);
+    showHandSkeletonRef.current = showHandSkeleton;
+  }, [currentPinch, isFistActive, currentLandmarks, showHandSkeleton]);
 
   // Physics / Interaction parameters
   const targetRotationX = useRef(0);
@@ -361,7 +365,7 @@ export default function HologramCanvas({
       ctx.restore();
 
       // OVERLAY GORGEOUS HAND LANDMARK skeleton directly on top of the 3D canvas viewport
-      if (activePinch) {
+      if (activePinch && showHandSkeletonRef.current) {
         let joints: { x: number; y: number; z: number }[] = [];
         if (activeLandmarks && activeLandmarks.length === 21) {
           joints = activeLandmarks;

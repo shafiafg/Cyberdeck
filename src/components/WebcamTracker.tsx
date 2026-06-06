@@ -130,9 +130,16 @@ export default function WebcamTracker({
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' }
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' }
+        });
+      } catch (firstErr) {
+        console.warn('First webcam constraint attempt failed, retrying with simple video indicator...', firstErr);
+        // Fallback constraint is extremely safe for virtual cams, generic webcams, and mobile setups
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -141,8 +148,16 @@ export default function WebcamTracker({
         setupMediaPipeTracker();
       }
     } catch (err: any) {
-      console.error(err);
-      setErrorMsg('Webcam access was denied or is not connected. Enter Simulation Mode below.');
+      console.error('Camera access failed:', err);
+      let descriptiveError = 'Webcam access was denied or is not connected. Enter Simulation Mode below.';
+      if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError' || err.message?.toLowerCase().includes('device not found')) {
+        descriptiveError = 'No physical webcam device found in this system or environment. Please interact via the 2D Simulator Mode below.';
+      } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError' || err.message?.toLowerCase().includes('permission')) {
+        descriptiveError = 'Webcam permission was denied by the browser. Please authorize camera access or continue using the Simulator.';
+      } else if (err.name === 'OverconstrainedError') {
+        descriptiveError = 'The requested camera resolution configuration is not supported by your hardware. Using simulation mode.';
+      }
+      setErrorMsg(descriptiveError);
       setActiveSource('simulator');
     }
   };

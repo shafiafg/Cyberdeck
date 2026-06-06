@@ -25,6 +25,7 @@ export default function App() {
   const [isFistActive, setIsFistActive] = useState(false);
   const [lastSwipe, setLastSwipe] = useState<{ direction: 'SWIPE_LEFT' | 'SWIPE_RIGHT'; timestamp: number } | null>(null);
   const [currentLandmarks, setCurrentLandmarks] = useState<{ x: number; y: number; z: number }[] | null>(null);
+  const [showHandSkeleton, setShowHandSkeleton] = useState(true);
 
   // FPS ticker states
   const [fps, setFps] = useState(0);
@@ -237,7 +238,25 @@ export default function App() {
               isFistActive={isFistActive} 
               lastSwipe={lastSwipe} 
               currentLandmarks={currentLandmarks}
+              showHandSkeleton={showHandSkeleton}
             />
+
+            {/* Tactical overlay for hand tracking visual mesh feedback */}
+            <div className="absolute bottom-4 right-4 z-20 flex gap-2">
+              <button
+                onClick={() => setShowHandSkeleton(prev => !prev)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg font-mono text-[10px] sm:text-xs font-semibold tracking-wider transition-all duration-300 backdrop-blur-md shadow-lg cursor-pointer ${
+                  showHandSkeleton
+                    ? 'border-cyan-500/40 bg-cyan-950/40 text-cyan-400 hover:border-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.25)]'
+                    : 'border-purple-500/30 bg-[#090514]/75 text-purple-400 hover:border-purple-400 hover:text-purple-300'
+                }`}
+                title={showHandSkeleton ? "Hide Hand Skeleton overlay on Hologram" : "Show Hand Skeleton overlay on Hologram"}
+                id="toggle-hand-skeleton-btn"
+              >
+                <div className={`w-2 h-2 rounded-full ${showHandSkeleton ? 'bg-cyan-400 animate-pulse shadow-[0_0_6px_rgba(34,211,238,1)]' : 'bg-purple-600'}`} />
+                <span>HAND_OVERLAY: {showHandSkeleton ? 'ACTIVE' : 'MUTED'}</span>
+              </button>
+            </div>
           </div>
 
           {/* Scrolling Terminal Frame Outputs */}

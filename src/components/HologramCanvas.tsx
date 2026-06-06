@@ -89,6 +89,20 @@ export default function HologramCanvas({
     isFistActiveRef.current = isFistActive;
     currentLandmarksRef.current = currentLandmarks;
     showHandSkeletonRef.current = showHandSkeleton;
+
+    // Drive centroid and rotation targets from fresh props every update
+    if (isFistActive && currentPinch) {
+      targetCentroidX.current = currentPinch.x;
+      targetCentroidY.current = currentPinch.y;
+      targetRotationX.current = (currentPinch.y - 0.5) * Math.PI * 2;
+      targetRotationY.current = (currentPinch.x - 0.5) * Math.PI * 2;
+    } else if (currentPinch) {
+      targetCentroidX.current = currentPinch.x;
+      targetCentroidY.current = currentPinch.y;
+    } else {
+      targetCentroidX.current = 0.5;
+      targetCentroidY.current = 0.5;
+    }
   }, [currentPinch, isFistActive, currentLandmarks, showHandSkeleton]);
 
   // Physics / Interaction parameters
@@ -147,27 +161,6 @@ export default function HologramCanvas({
     particles.current = list;
   }, []);
 
-  // Update centroid and rotation based on live coords
-  useEffect(() => {
-    const activeFist = isFistActiveRef.current;
-    const activePinch = currentPinchRef.current;
-
-    if (activeFist && activePinch) {
-      targetCentroidX.current = activePinch.x;
-      targetCentroidY.current = activePinch.y;
-      
-      // Control rotation speeds based on position
-      targetRotationX.current = (activePinch.y - 0.5) * Math.PI * 2;
-      targetRotationY.current = (activePinch.x - 0.5) * Math.PI * 2;
-    } else if (activePinch) {
-      targetCentroidX.current = activePinch.x;
-      targetCentroidY.current = activePinch.y;
-    } else {
-      // Revert floating parameters back to centered
-      targetCentroidX.current = 0.5;
-      targetCentroidY.current = 0.5;
-    }
-  }, [currentPinch, isFistActive]);
 
   // Handle Swipe triggers
   useEffect(() => {

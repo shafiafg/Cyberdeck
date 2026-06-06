@@ -7,26 +7,25 @@ export const pythonScriptContent = `#!/usr/bin/env python3
 """
 ================================================================================
        ____ _   _ ____  _____ ____  ____  _____ ____ _  __  _   _ ___ 
-      / ___| | | |  _ \\| ____|  _ \\|  _ \\| ____/ ___| |/ / | | | |_ _|
+      / ___| | | |  _ \\\\| ____|  _ \\\\|  _ \\\\| ____/ ___| |/ / | | | |_ _|
      | |   | | | | |_) |  _| | |_) | | | |  _|| |   | ' /  | | | || | 
-     | |___| |_| |  _ <| |___|  _ <| |_| | |__| |___| . \\  | |_| || | 
-      \\____|\\___/|_| \\_\\_____|_| \\_\\____/|_____\\____|_|\\_\\  \\___/|___|
+     | |___| |_| |  _ <| |___|  _ <| |_| | |__| |___| . \\\\  | |_| || | 
+      \\\\____|\\\\___/|_| \\\\_\\\\_____|_| \\\\_\\\\____/|_____\\\\____|_|\\\\_\\\\  \\\\___/|___|
                                                                       
-                       --- CORE VIBE ENGINE v1.1.0 ---
+                       --- CORE VIBE ENGINE v1.2.0 ---
              With Intelligent Auto-Fallback Synthesizer Simulation
 ================================================================================
 
 This Python script captures hand tracking data from your webcam, detects hand 
 gestures with fine-tuned spatial smoothing and state machines, and broadcasts 
-event payloads via a local WebSocket server to fuel high-performance, responsive 
-cyberdeck web frontends.
+event payloads (including full 21-point landmark arrays) via a local WebSocket 
+server to fuel high-performance, responsive cyberdeck web frontends.
 
-*** NEW IN v1.1.0: ADVANCED SIMULATION FALLBACK ENGINE ***
-If you do not have camera hardware, or if MediaPipe/OpenCV libraries are not 
-available, the script triggers an organic simulation mode automatically. It 
-simulates flowing hands following trigonometric wave orbits, occasional clenches, 
-and responsive swipes. Perfect for headless, camera-less, or light-weight visual 
-testing of high-performance cyberdeck interfaces!
+*** NEW IN v1.2.0: ***
+- Landmarks broadcast in all FIST/PINCH events so the web overlay renders
+  your actual hand skeleton in real-time over the hologram viewport.
+- Auto-simulation loop activates automatically when falling back (no camera).
+- Safe per-socket broadcast handler prevents one stale client crashing others.
 
 Requirements:
     pip install opencv-python mediapipe websockets asyncio
@@ -42,15 +41,15 @@ import random
 
 # Colored logging utility using standard ANSI Escape Sequences
 class ConsoleColor:
-    CYAN = "\\033[96m"
-    GREEN = "\\033[92m"
-    YELLOW = "\\033[93m"
-    RED = "\\033[91m"
-    MAGENTA = "\\033[95m"
-    BLUE = "\\033[94m"
-    BOLD = "\\033[1m"
-    UNDERLINE = "\\033[4m"
-    RESET = "\\033[0m"
+    CYAN = "\\\\033[96m"
+    GREEN = "\\\\033[92m"
+    YELLOW = "\\\\033[93m"
+    RED = "\\\\033[91m"
+    MAGENTA = "\\\\033[95m"
+    BLUE = "\\\\033[94m"
+    BOLD = "\\\\033[1m"
+    UNDERLINE = "\\\\033[4m"
+    RESET = "\\\\033[0m"
 
 def print_neon(msg, color=ConsoleColor.CYAN, prefix="[SYSTEM]"):
     """Prints a beautifully formatted, colorized terminal message."""
@@ -65,6 +64,7 @@ def print_neon(msg, color=ConsoleColor.CYAN, prefix="[SYSTEM]"):
 CONFIG = {
     # ------------ SIMULATION CONTROLS ------------
     "SIMULATION_MODE": False,   # Set to True to force mock interactive data feeds (ignoring camera).
+    "AUTO_SIMULATION": False,   # Set to True to enable automatic continuous orbit/swipe demo movements.
     
     # ---------------- CAM SETTINGS ----------------
     "WEBCAM_ID": 0,             # 0 is usually the built-in webcam.
@@ -119,6 +119,7 @@ if CONFIG["SIMULATION_MODE"]:
     print_neon("Manual simulation mode is enabled via CONFIG['SIMULATION_MODE'] = True.", ConsoleColor.MAGENTA, "[VIBE]")
 elif not OPENCV_AVAILABLE or not MEDIAPIPE_AVAILABLE:
     CONFIG["SIMULATION_MODE"] = True
+    CONFIG["AUTO_SIMULATION"] = True  # Auto-enable demo orbit loop when falling back — otherwise the UI stays frozen
     print_neon("AUTOMATIC FALLBACK: OpenCV or MediaPipe are incomplete. Initializing Vibe Simulator...", ConsoleColor.YELLOW, "[SYSTEM]")
 
 
@@ -149,6 +150,18 @@ class GestureDetector:
         """Calculates 3D Euclidean distance between two landmarks."""
         return math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2 + (p1.z - p2.z)**2)
 
+    def serialize_landmarks(self, landmarks):
+        """Converts MediaPipe landmark list to JSON-safe list of {x, y, z} dicts."""
+        mirror = CONFIG["MIRROR_VIDEO"]
+        return [
+            {
+                "x": round(1.0 - lm.x if mirror else lm.x, 5),
+                "y": round(lm.y, 5),
+                "z": round(lm.z, 5)
+            }
+            for lm in landmarks.landmark
+        ]
+
     def process_hand(self, landmarks):
         """Processes 21 MediaPipe landmarks and returns a list of fired events."""
         events = []
@@ -165,6 +178,9 @@ class GestureDetector:
         middle_tip = landmarks.landmark[12]
         ring_tip = landmarks.landmark[16]
         pinky_tip = landmarks.landmark[20]
+
+        # Serialize all 21 landmarks for web overlay rendering
+        serialized_landmarks = self.serialize_landmarks(landmarks)
 
         # 1. GESTURE: FIST DETECTOR
         hand_scale = self.calculate_distance(wrist, landmarks.landmark[9])
@@ -193,13 +209,15 @@ class GestureDetector:
                     "event": "FIST_START",
                     "x": round(fx, 4),
                     "y": round(fy, 4),
+                    "landmarks": serialized_landmarks,
                     "details": f"All fingers curled tight! Average distance ratio: {avg_finger_distance:.3f}"
                 })
             else:
                 events.append({
                     "event": "FIST_MOVE",
                     "x": round(fx, 4),
-                    "y": round(fy, 4)
+                    "y": round(fy, 4),
+                    "landmarks": serialized_landmarks
                 })
         else:
             if self.fist_active:
@@ -234,7 +252,8 @@ class GestureDetector:
                     "event": state_desc,
                     "x": round(tx, 4),
                     "y": round(ty, 4),
-                    "raw_distance": round(pinch_distance, 4)
+                    "raw_distance": round(pinch_distance, 4),
+                    "landmarks": serialized_landmarks
                 })
             else:
                 if self.pinch_active:
@@ -288,16 +307,28 @@ class WebSocketBroadcaster:
         print_neon(f"Cyberdeck Client Link Terminated. Active Nodes: {len(self.connected_sockets)}", ConsoleColor.YELLOW, "[SOCKET]")
 
     async def broadcast(self, payload):
-        """Serializes and sends hand payloads to all open active connections."""
+        """Serializes and sends hand payloads to all open active connections.
+        
+        Uses a safe per-socket send to isolate failures — a disconnected client
+        will not raise an exception that kills the remaining broadcast loop.
+        """
         if not self.connected_sockets:
             return
         
         message = json.dumps(payload)
-        tasks = [asyncio.create_task(ws.send(message)) for ws in self.connected_sockets]
-        done, pending = await asyncio.wait(tasks, timeout=0.01)
-        
-        for t in pending:
-            t.cancel()
+        dead_sockets = set()
+
+        async def safe_send(ws):
+            try:
+                await asyncio.wait_for(ws.send(message), timeout=0.05)
+            except Exception:
+                dead_sockets.add(ws)
+
+        await asyncio.gather(*(safe_send(ws) for ws in list(self.connected_sockets)))
+
+        # Prune dead connections identified during this broadcast cycle
+        for ws in dead_sockets:
+            self.connected_sockets.discard(ws)
 
     async def socket_handler(self, websocket, path=None):
         await self.register(websocket)
@@ -314,10 +345,18 @@ class WebSocketBroadcaster:
 #                       ORGANIC GESTURE SIMULATION LOOP
 # ==============================================================================
 async def main_simulation_loop(broadcaster):
-    """Generates continuous organic simulated hand motions for video testing."""
+    """Generates continuous organic simulated hand motions for video testing if enabled."""
     print_neon("Synthetic Hand Trajectory Simulator spawned.", ConsoleColor.MAGENTA, "[SIMULATOR]")
+    
+    if not CONFIG.get("AUTO_SIMULATION", False):
+        print_neon("Automatic trajectory demonstration orbits are currently set to IDLE.", ConsoleColor.YELLOW, "[SIMULATOR]")
+        print_neon("Hand coordinates are stationary. Set CONFIG['AUTO_SIMULATION'] = True in physical code to activate demoloops.", ConsoleColor.GREEN, "[SIMULATOR]")
+        # Keep process running silently so websocket connections are maintained
+        while True:
+            await asyncio.sleep(1.0)
+
     print_neon("Broadcasting high-resolution coordinate flows to dashboards...", ConsoleColor.GREEN, "[SIMULATOR]")
-    print(f"\\n{ConsoleColor.BOLD}{ConsoleColor.CYAN}--- ACTIVE EVENTS REAL-TIME SIMULATED STREAM ---{ConsoleColor.RESET}")
+    print(f"\\\\n{ConsoleColor.BOLD}{ConsoleColor.CYAN}--- ACTIVE EVENTS REAL-TIME SIMULATED STREAM ---{ConsoleColor.RESET}")
 
     # Orbital math factors
     t_coord = 0.0
@@ -428,6 +467,7 @@ async def main_video_loop(broadcaster):
     mp_hands = mp.solutions.hands
     tracker = mp_hands.Hands(
         max_num_hands=CONFIG["MAX_NUM_HANDS"],
+        model_complexity=0, # Fast lightweight model complexity for high speed tracking on lower end CPUs
         min_detection_confidence=CONFIG["MIN_DETECTION_CONFIDENCE"],
         min_tracking_confidence=CONFIG["MIN_TRACKING_CONFIDENCE"]
     )
@@ -436,7 +476,7 @@ async def main_video_loop(broadcaster):
 
     print_neon("Synaptic hand tracking framework online! MediaPipe tracking weights loaded.", ConsoleColor.GREEN, "[TRACKER]")
     print_neon("Listening for hand events on WebSocket... Ready to shoot cinematic clips!", ConsoleColor.MAGENTA, "[VIBE]")
-    print(f"\\n{ConsoleColor.BOLD}{ConsoleColor.CYAN}--- ACTIVE EVENTS REAL-TIME PROCESSOR ---{ConsoleColor.RESET}")
+    print(f"\\\\n{ConsoleColor.BOLD}{ConsoleColor.CYAN}--- ACTIVE EVENTS REAL-TIME PROCESSOR ---{ConsoleColor.RESET}")
 
     frame_interval = 1.0 / CONFIG["TARGET_FPS"]
     
@@ -484,7 +524,7 @@ async def main_video_loop(broadcaster):
 
             # Show window feed with cyberpunk overlay graphics
             if not CONFIG["RUN_HEADLESS"]:
-                cv2.putText(frame, "CYBERDECK HARNESS V1.1", (15, 30), 
+                cv2.putText(frame, "CYBERDECK HARNESS V1.2", (15, 30), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 180), 2, cv2.LINE_AA)
                 
                 status_color = (0, 255, 0) if detected_any_hand else (0, 0, 255)
@@ -566,7 +606,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(run_engine())
     except KeyboardInterrupt:
-        print("\\n")
+        print("\\\\n")
         print_neon("Shutdown signal received via termination keys. Exiting safely.", ConsoleColor.YELLOW, "[VIBE]")
         sys.exit(0)
 `;

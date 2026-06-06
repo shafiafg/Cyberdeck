@@ -59,6 +59,7 @@ def print_neon(msg, color=ConsoleColor.CYAN, prefix="[SYSTEM]"):
 CONFIG = {
     # ------------ SIMULATION CONTROLS ------------
     "SIMULATION_MODE": False,   # Set to True to force mock interactive data feeds (ignoring camera).
+    "AUTO_SIMULATION": False,   # Set to True to enable automatic continuous orbit/swipe demo movements.
     
     # ---------------- CAM SETTINGS ----------------
     "WEBCAM_ID": 0,             # 0 is usually the built-in webcam.
@@ -113,6 +114,7 @@ if CONFIG["SIMULATION_MODE"]:
     print_neon("Manual simulation mode is enabled via CONFIG['SIMULATION_MODE'] = True.", ConsoleColor.MAGENTA, "[VIBE]")
 elif not OPENCV_AVAILABLE or not MEDIAPIPE_AVAILABLE:
     CONFIG["SIMULATION_MODE"] = True
+    CONFIG["AUTO_SIMULATION"] = True  # Auto-enable demo orbit loop when falling back — otherwise the UI stays frozen
     print_neon("AUTOMATIC FALLBACK: OpenCV or MediaPipe are incomplete. Initializing Vibe Simulator...", ConsoleColor.YELLOW, "[SYSTEM]")
 
 
@@ -143,6 +145,18 @@ class GestureDetector:
         """Calculates 3D Euclidean distance between two landmarks."""
         return math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2 + (p1.z - p2.z)**2)
 
+    def serialize_landmarks(self, landmarks):
+        """Converts MediaPipe landmark list to JSON-safe list of {x, y, z} dicts."""
+        mirror = CONFIG["MIRROR_VIDEO"]
+        return [
+            {
+                "x": round(1.0 - lm.x if mirror else lm.x, 5),
+                "y": round(lm.y, 5),
+                "z": round(lm.z, 5)
+            }
+            for lm in landmarks.landmark
+        ]
+
     def process_hand(self, landmarks):
         """Processes 21 MediaPipe landmarks and returns a list of fired events."""
         events = []
@@ -159,6 +173,9 @@ class GestureDetector:
         middle_tip = landmarks.landmark[12]
         ring_tip = landmarks.landmark[16]
         pinky_tip = landmarks.landmark[20]
+
+        # Serialize all 21 landmarks for web overlay rendering
+        serialized_landmarks = self.serialize_landmarks(landmarks)
 
         # 1. GESTURE: FIST DETECTOR
         hand_scale = self.calculate_distance(wrist, landmarks.landmark[9])
@@ -187,13 +204,15 @@ class GestureDetector:
                     "event": "FIST_START",
                     "x": round(fx, 4),
                     "y": round(fy, 4),
+                    "landmarks": serialized_landmarks,
                     "details": f"All fingers curled tight! Average distance ratio: {avg_finger_distance:.3f}"
                 })
             else:
                 events.append({
                     "event": "FIST_MOVE",
                     "x": round(fx, 4),
-                    "y": round(fy, 4)
+                    "y": round(fy, 4),
+                    "landmarks": serialized_landmarks
                 })
         else:
             if self.fist_active:
@@ -228,7 +247,8 @@ class GestureDetector:
                     "event": state_desc,
                     "x": round(tx, 4),
                     "y": round(ty, 4),
-                    "raw_distance": round(pinch_distance, 4)
+                    "raw_distance": round(pinch_distance, 4),
+                    "landmarks": serialized_landmarks
                 })
             else:
                 if self.pinch_active:
@@ -282,16 +302,28 @@ class WebSocketBroadcaster:
         print_neon(f"Cyberdeck Client Link Terminated. Active Nodes: {len(self.connected_sockets)}", ConsoleColor.YELLOW, "[SOCKET]")
 
     async def broadcast(self, payload):
-        """Serializes and sends hand payloads to all open active connections."""
+        """Serializes and sends hand payloads to all open active connections.
+        
+        Uses a safe per-socket send to isolate failures — a disconnected client
+        will not raise an exception that kills the remaining broadcast loop.
+        """
         if not self.connected_sockets:
             return
         
         message = json.dumps(payload)
-        tasks = [asyncio.create_task(ws.send(message)) for ws in self.connected_sockets]
-        done, pending = await asyncio.wait(tasks, timeout=0.01)
-        
-        for t in pending:
-            t.cancel()
+        dead_sockets = set()
+
+        async def safe_send(ws):
+            try:
+                await asyncio.wait_for(ws.send(message), timeout=0.05)
+            except Exception:
+                dead_sockets.add(ws)
+
+        await asyncio.gather(*(safe_send(ws) for ws in list(self.connected_sockets)))
+
+        # Prune dead connections identified during this broadcast cycle
+        for ws in dead_sockets:
+            self.connected_sockets.discard(ws)
 
     async def socket_handler(self, websocket, path=None):
         await self.register(websocket)
@@ -308,8 +340,16 @@ class WebSocketBroadcaster:
 #                       ORGANIC GESTURE SIMULATION LOOP
 # ==============================================================================
 async def main_simulation_loop(broadcaster):
-    """Generates continuous organic simulated hand motions for video testing."""
+    """Generates continuous organic simulated hand motions for video testing if enabled."""
     print_neon("Synthetic Hand Trajectory Simulator spawned.", ConsoleColor.MAGENTA, "[SIMULATOR]")
+    
+    if not CONFIG.get("AUTO_SIMULATION", False):
+        print_neon("Automatic trajectory demonstration orbits are currently set to IDLE.", ConsoleColor.YELLOW, "[SIMULATOR]")
+        print_neon("Hand coordinates are stationary. Set CONFIG['AUTO_SIMULATION'] = True in physical code to activate demoloops.", ConsoleColor.GREEN, "[SIMULATOR]")
+        # Keep process running silently so websocket connections are maintained
+        while True:
+            await asyncio.sleep(1.0)
+
     print_neon("Broadcasting high-resolution coordinate flows to dashboards...", ConsoleColor.GREEN, "[SIMULATOR]")
     print(f"\n{ConsoleColor.BOLD}{ConsoleColor.CYAN}--- ACTIVE EVENTS REAL-TIME SIMULATED STREAM ---{ConsoleColor.RESET}")
 

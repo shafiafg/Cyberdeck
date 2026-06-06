@@ -18,6 +18,8 @@ View your app in AI Studio: https://ai.studio/apps/ed2f49c0-f791-48bb-be6d-10e38
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
+
+
 to run it do
 python core_vibe_engine.py
 make sure that when doing this you have the requirments installed as well as you do this command in the folder as the path

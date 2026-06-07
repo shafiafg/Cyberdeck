@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
-const CHECKPOINT_DIR = path.resolve(process.cwd(), 'checkpoint_great_reset');
+const checkpointName = process.argv[3] || 'cursor_changes';
+const CHECKPOINT_DIR = path.resolve(process.cwd(), `checkpoint_${checkpointName}`);
 
 // Files and folders we want to back up
 const TARGETS = [
@@ -12,7 +13,13 @@ const TARGETS = [
   'vite.config.ts',
   'metadata.json',
   'index.html',
-  'src'
+  'src',
+  'cyberdeck',
+  'cyberdeck.py',
+  'terminal_cyberdeck_hud.py',
+  'build.py',
+  'run.sh',
+  'run.bat'
 ];
 
 async function copyRecursive(src: string, dest: string) {
@@ -30,7 +37,7 @@ async function copyRecursive(src: string, dest: string) {
 }
 
 async function backup() {
-  console.log(`\n=== Creating Checkpoint: "Great Reset" ===`);
+  console.log(`\n=== Creating Checkpoint: "${checkpointName}" ===`);
   
   if (fs.existsSync(CHECKPOINT_DIR)) {
     console.log(`Removing existing checkpoint at ${CHECKPOINT_DIR}...`);
@@ -51,13 +58,13 @@ async function backup() {
     }
   }
 
-  console.log(`\n>>> CHECKPOINT "Great Reset" SUCCESSFULLY CREATED!`);
+  console.log(`\n>>> CHECKPOINT "${checkpointName}" SUCCESSFULLY CREATED!`);
   console.log(`Saved at: ${CHECKPOINT_DIR}`);
-  console.log(`To restore at any point, run: npx tsx checkpoint_manager.ts restore\n`);
+  console.log(`To restore at any point, run: npx tsx checkpoint_manager.ts restore ${checkpointName}\n`);
 }
 
 async function restore() {
-  console.log(`\n=== Restoring from Checkpoint: "Great Reset" ===`);
+  console.log(`\n=== Restoring from Checkpoint: "${checkpointName}" ===`);
   
   if (!fs.existsSync(CHECKPOINT_DIR)) {
     console.error(`Error: Checkpoint directory not found at ${CHECKPOINT_DIR}`);
@@ -77,7 +84,7 @@ async function restore() {
     }
   }
 
-  console.log(`\n>>> WORKSPACE RESTORED SUCCESSFULLY TO "Great Reset"!`);
+  console.log(`\n>>> WORKSPACE RESTORED SUCCESSFULLY TO "${checkpointName}"!`);
   console.log(`Everything has been reset back to this checkpoint.\n`);
 }
 
@@ -89,8 +96,8 @@ async function main() {
     await restore();
   } else {
     console.log('Usage:');
-    console.log('  npx tsx checkpoint_manager.ts backup   - Save current state as "Great Reset"');
-    console.log('  npx tsx checkpoint_manager.ts restore  - Restore workspace back to "Great Reset"');
+    console.log('  npx tsx checkpoint_manager.ts backup [name]   - Save current state (defaults to "cursor_changes")');
+    console.log('  npx tsx checkpoint_manager.ts restore [name]  - Restore workspace back to a checkpoint (defaults to "cursor_changes")');
   }
 }
 

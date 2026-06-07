@@ -9,7 +9,7 @@ if [ ! -d "venv" ]; then
 fi
 
 source venv/bin/activate
-pip install -q -r requirements.txt
+pip install -r requirements.txt
 
 MODE="${1:-gui}"
 case "$MODE" in

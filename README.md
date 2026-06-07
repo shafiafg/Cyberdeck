@@ -128,3 +128,17 @@ Once compilation finishes, navigate into the created `dist\` folder to launch **
 - **Toggle Shape Mode:** Toggle geometry layout rendering styles seamlessly from `Sphere` to `Cylinder` in the Tkinter cockpit.
 - **Telemetry Analysis:** The live output console logs when the system shifts from seeking state, to lock coordinates (`PINCH`), to volume squeeze (`FIST`).
 
+<<<<<<< HEAD
+=======
+1. Install dependencies:
+   `npm install`
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
+3. Run the app:
+   `npm run dev`
+
+
+to run it do
+python core_vibe_engine.py
+make sure that when doing this you have the requirments installed as well as you do this command in the folder as the path
+webcam needed
+

@@ -278,7 +278,7 @@ class CyberdeckApp:
         pygame.init()
         pygame.display.set_caption("CYBERDECK GESTURE CONTROLLER v3.0 — NATIVE")
         self.screen = pygame.display.set_mode((WIN_W, WIN_H))
-        self.clock = pygame.clock.Clock()
+        self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("consolas", 14)
         self.font_sm = pygame.font.SysFont("consolas", 11)
         self.font_lg = pygame.font.SysFont("consolas", 18, bold=True)

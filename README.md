@@ -48,11 +48,13 @@ Python is the language our hologram speaks. We need to install it first:
 5. Click **"Install Now"** and wait for it to finish.
 
 ### Step 2: Open "Command Prompt" (The Command Desk)
-We need to tell the computer to load our program folder:
+We need to tell the computer to look inside our program folder:
 1. Press the **Windows Key** on your keyboard (the one with the flag on it).
-2. Type the letters **`cmd`** and press **Enter**. A black window with text will open up.
-3. Type `cd` followed by a space, and then **drag and drop your Cyberdeck folder** right from your file storage window into that black box. It will automatically fill in the folder location!
-4. Press **Enter**.
+2. Type the letters **`cmd`** and press **Enter**. A black window with text (the Command Desk) will open up.
+3. Type **`cd `** followed by a single space.
+4. **The Magic Drag-and-Drop Trick:** Go to your regular file folder window, left-click on the `Cyberdeck` folder, **hold down your mouse button, drag the folder directly over into that black box, and let go of the mouse button!**
+   * *How does this work?* Modern computers have a secret trick: dragging any file or folder into a black command box instantly types out its exact address for you! No typing or copy-pasting required!
+5. Press **Enter** on your keyboard. Now the Command Desk is looking inside your folder!
 
 ### Step 3: Install the Virtual Libraries
 Copy and paste this exact sentence into the black box, then press **Enter**:

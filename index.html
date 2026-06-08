@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cyberdeck Gesture Controller — Quick Guide</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --bg-color: #05020c;
+        --card-bg: #0b071a;
+        --accent-cyan: #00ffff;
+        --accent-pink: #ff007f;
+        --text-color: #d1c4e9;
+        --text-muted: #7d6e9c;
+        --border-color: rgba(139, 92, 246, 0.2);
+        --font-sans: 'Inter', sans-serif;
+        --font-display: 'Space Grotesk', sans-serif;
+        --font-mono: 'JetBrains Mono', monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        font-family: var(--font-sans);
+        line-height: 1.6;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        position: relative;
+        overflow-x: hidden;
+      }
+
+      /* Glow effect */
+      body::before {
+        content: "";
+        position: absolute;
+        width: 600px;
+        height: 600px;
+        top: -100px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: radial-gradient(circle, rgba(139, 92, 246, 0.15) 0%, rgba(5, 2, 12, 0) 70%);
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      header {
+        border-bottom: 1px solid rgba(139, 92, 246, 0.3);
+        background-color: rgba(9, 5, 20, 0.9);
+        padding: 1.5rem 2rem;
+        backdrop-filter: blur(10px);
+        position: relative;
+        z-index: 10;
+      }
+
+      .header-line {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 2px;
+        background: linear-gradient(90deg, var(--accent-pink), var(--accent-cyan));
+        box-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+      }
+
+      .header-container {
+        max-width: 1000px;
+        margin: 0 auto;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 1rem;
+      }
+
+      .logo-group {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .logo-icon {
+        width: 40px;
+        height: 40px;
+        border: 1px solid rgba(139, 92, 246, 0.4);
+        background-color: rgba(26, 15, 58, 0.4);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--accent-cyan);
+        font-family: var(--font-mono);
+        font-weight: bold;
+        text-shadow: 0 0 8px var(--accent-cyan);
+      }
+
+      .logo-text h1 {
+        font-family: var(--font-display);
+        font-size: 1.25rem;
+        color: #ffffff;
+        letter-spacing: 0.05em;
+      }
+
+      .logo-text span {
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        color: var(--accent-pink);
+        text-transform: uppercase;
+        letter-spacing: 0.2em;
+        font-weight: bold;
+        display: block;
+      }
+
+      .status-badge {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: #10b981;
+        background-color: rgba(16, 185, 129, 0.1);
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        padding: 0.35rem 0.75rem;
+        border-radius: 50px;
+        letter-spacing: 0.05em;
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        background-color: #10b981;
+        border-radius: 50%;
+        box-shadow: 0 0 8px #10b981;
+        animation: pulse 1.8s infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+      }
+
+      main {
+        flex: 1;
+        max-width: 1000px;
+        width: 100%;
+        margin: 0 auto;
+        padding: 2.5rem 1.5rem;
+        position: relative;
+        z-index: 10;
+        display: grid;
+        grid-template-cols: 1fr;
+        gap: 2rem;
+      }
+
+      .card {
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 2rem;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        position: relative;
+      }
+
+      .card-header {
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid rgba(139, 92, 246, 0.1);
+        padding-bottom: 1rem;
+      }
+
+      .card-title {
+        font-family: var(--font-display);
+        font-size: 1.5rem;
+        color: #ffffff;
+        font-weight: 600;
+      }
+
+      .card-subtitle {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+        margin-top: 0.25rem;
+      }
+
+      .instructions-grid {
+        display: grid;
+        grid-template-cols: 1fr;
+        gap: 1.75rem;
+      }
+
+      @media (min-width: 768px) {
+        .instructions-grid {
+          grid-template-cols: 1fr 1fr;
+        }
+      }
+
+      .step-block {
+        background-color: rgba(9, 5, 20, 0.5);
+        border: 1px solid rgba(139, 92, 246, 0.1);
+        border-radius: 8px;
+        padding: 1.25rem;
+        position: relative;
+      }
+
+      .step-number {
+        position: absolute;
+        top: -12px;
+        left: 16px;
+        background-color: var(--bg-color);
+        border: 1px solid var(--border-color);
+        color: var(--accent-cyan);
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        font-weight: bold;
+        padding: 2px 8px;
+        border-radius: 4px;
+      }
+
+      .step-title {
+        font-family: var(--font-display);
+        color: #ffffff;
+        font-size: 1rem;
+        margin-bottom: 0.75rem;
+        margin-top: 0.25rem;
+      }
+
+      .step-desc {
+        font-size: 0.85rem;
+        color: var(--text-color);
+        margin-bottom: 1rem;
+        opacity: 0.85;
+      }
+
+      .code-container {
+        background-color: #030107;
+        border: 1px solid rgba(139, 92, 246, 0.2);
+        border-radius: 6px;
+        padding: 0.75rem 1rem;
+        position: relative;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        color: var(--accent-cyan);
+        overflow-x: auto;
+      }
+
+      .code-text {
+        white-space: nowrap;
+        user-select: all;
+      }
+
+      .copy-btn {
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        font-family: var(--font-mono);
+        font-size: 0.65rem;
+        padding: 2px 6px;
+        border: 1px solid rgba(139, 92, 246, 0.2);
+        border-radius: 4px;
+        background-color: rgba(26, 15, 58, 0.3);
+        transition: all 0.2s;
+        margin-left: 0.5rem;
+      }
+
+      .copy-btn:hover {
+        color: #ffffff;
+        border-color: var(--accent-cyan);
+        background-color: rgba(0, 255, 255, 0.05);
+      }
+
+      .file-group {
+        display: grid;
+        grid-template-cols: 1fr;
+        gap: 1rem;
+        margin-top: 1.5rem;
+      }
+
+      @media (min-width: 640px) {
+        .file-group {
+          grid-template-cols: repeat(3, 1fr);
+        }
+      }
+
+      .file-card {
+        background-color: rgba(9, 5, 20, 0.4);
+        border: 1px solid rgba(139, 92, 246, 0.1);
+        border-radius: 8px;
+        padding: 1rem;
+        text-align: center;
+      }
+
+      .file-icon {
+        font-size: 1.5rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .file-name {
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        color: #ffffff;
+        margin-bottom: 0.25rem;
+      }
+
+      .file-info {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+      }
+
+      footer {
+        border-t: 1px solid rgba(139, 92, 246, 0.1);
+        background-color: rgba(9, 5, 20, 0.4);
+        padding: 1.25rem;
+        text-align: center;
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        margin-top: auto;
+        position: relative;
+        z-index: 10;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-line"></div>
+      <div class="header-container">
+        <div class="logo-group">
+          <div class="logo-icon">CD</div>
+          <div class="logo-text">
+            <h1>CYBERDECK</h1>
+            <span>NATIVE CONTROLLER</span>
+          </div>
+        </div>
+        <div class="status-badge">
+          <div class="status-dot"></div>
+          <span>DESKTOP OPTIMIZED ENVIRONMENT (ACTIVE)</span>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">🌌 Cyberdeck Gesture Controller</h2>
+          <p class="card-subtitle">Offline 3D Hand Hologram — Clean, Native, and 100% Lightweight</p>
+        </div>
+
+        <p style="margin-bottom: 1.5rem; font-size: 0.9rem; opacity: 0.9;">
+          We pruned away all unnecessary Node.js packages and frontend compilations to make this project directory as lightweight as possible (under 1MB!). This ensures instant downloads, extraction, and clean execution on your local machine.
+        </p>
+
+        <div class="instructions-grid">
+          <!-- Step 1 -->
+          <div class="step-block">
+            <span class="step-number">STEP 1</span>
+            <h3 class="step-title">Install Camera & AI Libraries</h3>
+            <p class="step-desc">Open your Terminal or Command Prompt and install these requirements:</p>
+            <div class="code-container">
+              <span class="code-text" id="code-libs">pip install -r requirements.txt</span>
+              <button class="copy-btn" onclick="copyText('code-libs')">COPY</button>
+            </div>
+          </div>
+
+          <!-- Step 2 -->
+          <div class="step-block">
+            <span class="step-number">STEP 2</span>
+            <h3 class="step-title">Run Cyberdeck Controller</h3>
+            <p class="step-desc">Boot up the main native gesture engine on your computer:</p>
+            <div class="code-container">
+              <span class="code-text" id="code-run">python cyberdeck.py</span>
+              <button class="copy-btn" onclick="copyText('code-run')">COPY</button>
+            </div>
+          </div>
+        </div>
+
+        <h3 style="font-family: var(--font-display); color: #ffffff; size: 1.1rem; margin-top: 2rem; margin-bottom: 0.75rem; border-top: 1px solid rgba(139, 92, 246, 0.1); padding-top: 1.5rem;">
+          💼 Active Repository File Structure
+        </h3>
+        <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+          These are the simple files that remain in your lightweight workspace:
+        </p>
+
+        <div class="file-group">
+          <div class="file-card">
+            <div class="file-icon">🐍</div>
+            <div class="file-name">cyberdeck.py</div>
+            <div class="file-info">Core pygame 3D app</div>
+          </div>
+          <div class="file-card">
+            <div class="file-icon">📁</div>
+            <div class="file-name">cyberdeck/</div>
+            <div class="file-info">Gesture detection modules</div>
+          </div>
+          <div class="file-card">
+            <div class="file-icon">📦</div>
+            <div class="file-name">requirements.txt</div>
+            <div class="file-info">Python dependency index</div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      <span>CYBERDECK // NATIVE EMULATOR EMBEDDED HUD SERVICES // SECURE CONNECTION TERMINATION</span>
+    </footer>
+
+    <script>
+      function copyText(elementId) {
+        const textElement = document.getElementById(elementId);
+        const text = textElement.innerText || textElement.textContent;
+        navigator.clipboard.writeText(text).then(() => {
+          const btn = textElement.nextElementSibling;
+          const originalText = btn.innerText;
+          btn.innerText = "COPIED!";
+          btn.style.color = "#00ffff";
+          btn.style.borderColor = "#00ffff";
+          setTimeout(() => {
+            btn.innerText = originalText;
+            btn.style.color = "";
+            btn.style.borderColor = "";
+          }, 2000);
+        });
+      }
+    </script>
+  </body>
+</html>

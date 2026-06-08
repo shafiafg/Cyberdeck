@@ -59,7 +59,7 @@ class GestureEngine:
     def _serialize_landmarks(self, landmarks) -> List[Dict[str, float]]:
         return [
             {
-                "x": round(1.0 - lm.x if self.mirror else lm.x, 4),
+                "x": round(lm.x, 4),
                 "y": round(lm.y, 4),
                 "z": round(lm.z, 4),
             }
@@ -91,7 +91,7 @@ class GestureEngine:
         ]
         avg_finger = sum(finger_ratios) / len(finger_ratios)
 
-        px = 1.0 - palm.x if self.mirror else palm.x
+        px = palm.x
         py = palm.y
         state.palm_x = max(0.0, min(1.0, px))
         state.palm_y = max(0.0, min(1.0, py))
@@ -108,7 +108,7 @@ class GestureEngine:
                 state.pinch = True
                 cx = (index.x + thumb.x) / 2.0
                 cy = (index.y + thumb.y) / 2.0
-                state.palm_x = max(0.0, min(1.0, 1.0 - cx if self.mirror else cx))
+                state.palm_x = max(0.0, min(1.0, cx))
                 state.palm_y = max(0.0, min(1.0, cy))
                 if not self._was_pinch:
                     state.events.append("PINCH_START")
@@ -117,7 +117,7 @@ class GestureEngine:
             else:
                 state.events.append("PALM_MOVE")
 
-        wrist_x = 1.0 - wrist.x if self.mirror else wrist.x
+        wrist_x = wrist.x
         if self._prev_wrist_x is not None and now >= self._swipe_cooldown_until:
             velocity = (wrist_x - self._prev_wrist_x) / dt
             if abs(velocity) > self.SWIPE_VELOCITY:

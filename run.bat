@@ -81,6 +81,12 @@ goto end
 :pip_failed
 echo.
 echo [ERROR] Failed to install dependencies!
+echo.
+echo 💡 TROUBLESHOOTING TIP:
+echo If you recently had a failed installation, your "venv" folder might be corrupted.
+echo Please delete the "venv" folder in this directory and run "run.bat" again.
+echo The script will recreate a clean environment and install everything perfectly!
+echo.
 echo Please verify your internet connection is active and try again.
 goto end
 

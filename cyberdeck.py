@@ -43,16 +43,31 @@ TARGET_FPS = 60
 
 
 class Particle:
-    __slots__ = ("x", "y", "z", "ox", "oy", "oz", "hue")
+    __slots__ = ("x", "y", "z", "ox", "oy", "oz", "vx", "vy", "vz", "life", "max_life", "color", "size")
 
     def __init__(self):
-        self.ox = random.uniform(-1.2, 1.2)
-        self.oy = random.uniform(-1.2, 1.2)
-        self.oz = random.uniform(-1.2, 1.2)
+        self.reset()
+
+    def reset(self):
+        theta = random.uniform(0, 2 * math.pi)
+        phi = random.acos(random.uniform(-1, 1))
+        r = random.uniform(0.7, 1.4)
+        self.ox = r * math.sin(phi) * math.cos(theta)
+        self.oy = r * math.sin(phi) * math.sin(theta)
+        self.oz = r * math.cos(phi)
+
         self.x = self.ox
         self.y = self.oy
         self.z = self.oz
-        self.hue = random.choice(["magenta", "cyan"])
+
+        self.vx = math.sin(phi) * math.cos(theta)
+        self.vy = math.sin(phi) * math.sin(theta)
+        self.vz = math.cos(phi)
+
+        self.life = random.uniform(0.5, 1.5)
+        self.max_life = self.life
+        self.color = random.choice([COLORS.CYAN, COLORS.MAGENTA, COLORS.MUTED])
+        self.size = random.choice([1, 2])
 
 
 class HologramRenderer:
@@ -64,9 +79,24 @@ class HologramRenderer:
         self.rot_x = 0.0
         self.rot_y = 0.0
         self.rot_z = 0.0
-        self.particles: List[Particle] = [Particle() for _ in range(180)]
+        self.particles: List[Particle] = [Particle() for _ in range(240)]
         self.scan_y = 0.0
         self.swipe_flash = 0.0
+
+        # Persistent translation coordinate for pinch/grasp drag-and-drop mechanics
+        self.holo_x = 0.0
+        self.holo_y = 0.0
+
+        # Grab and Drag tracking state
+        self.is_dragging = False
+        self.drag_start_hand_x = 0.0
+        self.drag_start_hand_y = 0.0
+        self.drag_start_holo_x = 0.0
+        self.drag_start_holo_y = 0.0
+
+        self._was_fist = False
+        self.explosion_wave = 0.0
+        self.current_scale = 1.0
 
     def set_form(self, form: str) -> None:
         self.form = form
@@ -91,6 +121,90 @@ class HologramRenderer:
             projected.append((x + int(offset_x), y + int(offset_y), z))
         return projected
 
+    def _draw_3d_ring(
+        self,
+        surface: pygame.Surface,
+        radius: float,
+        rot_x: float,
+        rot_y: float,
+        rot_z: float,
+        disp_x: float,
+        disp_y: float,
+        fov: float,
+        color: tuple,
+        width: int = 1,
+        segmented: bool = False,
+        num_points: int = 48,
+    ):
+        points = []
+        for i in range(num_points):
+            theta = 2.0 * math.pi * i / num_points
+            p = Vec3(radius * math.cos(theta), 0.0, radius * math.sin(theta))
+            p = p.rotate_y(rot_y).rotate_x(rot_x).rotate_z(rot_z)
+            px, py, pz = p.project(self.width, self.height, fov=fov)
+            points.append((px + int(disp_x), py + int(disp_y), pz))
+
+        for i in range(num_points):
+            if segmented and (i // 2) % 3 == 0:
+                continue
+            p1 = points[i]
+            p2 = points[(i + 1) % num_points]
+
+            if p1[2] < -2.95 or p2[2] < -2.95:
+                continue
+
+            avg_z = (p1[2] + p2[2]) / 2.0
+            depth_ratio = max(0.2, min(1.0, 1.0 - (avg_z / (radius * 1.8 + 0.1))))
+            seg_color = (
+                int(color[0] * depth_ratio),
+                int(color[1] * depth_ratio),
+                int(color[2] * depth_ratio),
+            )
+            pygame.draw.line(surface, seg_color, (p1[0], p1[1]), (p2[0], p2[1]), width)
+
+    def _draw_3d_grid_base(
+        self,
+        surface: pygame.Surface,
+        size: float,
+        y_offset: float,
+        disp_x: float,
+        disp_y: float,
+        fov: float,
+    ):
+        divisions = 6
+        step = size / divisions
+        lines = []
+
+        for i in range(divisions + 1):
+            x = -size/2 + i * step
+            lines.append((Vec3(x, y_offset, -size/2), Vec3(x, y_offset, size/2)))
+
+        for i in range(divisions + 1):
+            z = -size/2 + i * step
+            lines.append((Vec3(-size/2, y_offset, z), Vec3(size/2, y_offset, z)))
+
+        for p1, p2 in lines:
+            p1_rot = p1.rotate_y(self.rot_y).rotate_x(self.rot_x).rotate_z(self.rot_z)
+            p2_rot = p2.rotate_y(self.rot_y).rotate_x(self.rot_x).rotate_z(self.rot_z)
+
+            px1, py1, pz1 = p1_rot.project(self.width, self.height, fov=fov)
+            px2, py2, pz2 = p2_rot.project(self.width, self.height, fov=fov)
+
+            px1 += int(disp_x)
+            py1 += int(disp_y)
+            px2 += int(disp_x)
+            py2 += int(disp_y)
+
+            avg_z = (pz1 + pz2) / 2.0
+            depth_ratio = max(0.08, min(0.65, 0.65 - (avg_z / 3.0)))
+            
+            grid_color = (
+                int(COLORS.GRID[0] * depth_ratio),
+                int(COLORS.GRID[1] * depth_ratio),
+                int(COLORS.GRID[2] * depth_ratio),
+            )
+            pygame.draw.line(surface, grid_color, (px1, py1), (px2, py2), 1)
+
     def render(
         self,
         surface: pygame.Surface,
@@ -105,78 +219,231 @@ class HologramRenderer:
         surface.fill(COLORS.VOID)
         cx, cy = self.width / 2, self.height / 2
         min_dim = min(self.width, self.height)
-        fov = min_dim * 0.42
+        fov = min_dim * 0.45
 
-        # Grid + horizon
-        pygame.draw.circle(surface, COLORS.GRID, (int(cx), int(cy)), int(min_dim * 0.34), 1)
+        # Steering Rotation vs Autonomous drift
+        if hand_detected:
+            target_yaw = (hand_x - 0.5) * 135.0
+            target_pitch = (hand_y - 0.5) * -135.0
+            self.rot_y += (target_yaw - self.rot_y) * 0.12
+            self.rot_x += (target_pitch - self.rot_x) * 0.12
+            self.rot_z += dt * 36.0
+        else:
+            self.rot_y += dt * 25.0
+            self.rot_x += dt * 10.0
+            self.rot_z += dt * 16.0
+            target_yaw, target_pitch = 0.0, 0.0
+
+        # Pinch to Drag-and-Drop Hologram
+        if hand_detected and pinch:
+            if not self.is_dragging:
+                self.is_dragging = True
+                self.drag_start_hand_x = hand_x
+                self.drag_start_hand_y = hand_y
+                self.drag_start_holo_x = self.holo_x
+                self.drag_start_holo_y = self.holo_y
+            else:
+                dx = hand_x - self.drag_start_hand_x
+                dy = hand_y - self.drag_start_hand_y
+                self.holo_x = self.drag_start_holo_x + dx * 2.0
+                self.holo_y = self.drag_start_holo_y + dy * 2.0
+                self.holo_x = max(-1.0, min(1.0, self.holo_x))
+                self.holo_y = max(-1.0, min(1.0, self.holo_y))
+        else:
+            self.is_dragging = False
+
+        disp_x = self.holo_x * self.width * 0.38
+        disp_y = -self.holo_y * self.height * 0.38
+
+        # Fist shockwave release
+        if self._was_fist and not fist:
+            self.explosion_wave = 1.0
+            for p in self.particles:
+                p.life = p.max_life
+        self._was_fist = fist
+
+        if self.explosion_wave > 0:
+            self.explosion_wave = max(0.0, self.explosion_wave - dt * 2.0)
+
+        # Draw compass matrix circle on the bottom deck
+        pygame.draw.circle(surface, COLORS.GRID, (int(cx), int(cy)), int(min_dim * 0.36), 1)
         pygame.draw.line(surface, (18, 10, 36), (0, int(cy)), (self.width, int(cy)), 1)
         pygame.draw.line(surface, (18, 10, 36), (int(cx), 0), (int(cx), self.height), 1)
 
-        target_yaw = (hand_x - 0.5) * 140
-        target_pitch = (hand_y - 0.5) * -140
-        self.rot_y += (target_yaw - self.rot_y) * 0.12
-        self.rot_x += (target_pitch - self.rot_x) * 0.12
-        self.rot_z += 0.55 + (2.5 if swipe else 0.0)
+        # Scale interpolation (fist compress vs palm extend)
+        scale_target = 0.30 if fist else 1.0
+        self.current_scale += (scale_target - self.current_scale) * dt * 9.0
 
-        if swipe:
-            self.swipe_flash = 1.0
-        self.swipe_flash = max(0.0, self.swipe_flash - dt * 2.5)
+        # Draw rotating coordinate grid floor platform
+        self._draw_3d_grid_base(surface, size=1.8, y_offset=-0.95, disp_x=disp_x, disp_y=disp_y, fov=fov)
 
-        scale = 0.55 if fist else 1.0
-        disp_x = (hand_x - 0.5) * self.width * 0.35 if hand_detected else 0.0
-        disp_y = (hand_y - 0.5) * -self.height * 0.35 if hand_detected else 0.0
-
-        inner_rot_y = -self.rot_y * 1.4 - time.time() * 18
+        # Render Core Wireframe Geometry
+        inner_rot_y = -self.rot_y * 1.5 - time.time() * 20.0
         inner_proj = self._project_mesh(
-            self.inner_v, self.rot_x, inner_rot_y, -self.rot_z * 1.8,
-            scale, disp_x, disp_y, fov,
+            self.inner_v, self.rot_x, inner_rot_y, -self.rot_z * 1.6,
+            self.current_scale, disp_x, disp_y, fov,
         )
         outer_proj = self._project_mesh(
             self.outer_v, self.rot_x, self.rot_y, self.rot_z,
-            scale, disp_x, disp_y, fov,
+            self.current_scale, disp_x, disp_y, fov,
         )
 
-        # Particles
+        # Update Particle Accretion / Shockwaves
         for p in self.particles:
-            p.x = p.ox + math.sin(time.time() * 0.7 + p.oz) * 0.05
-            p.y = p.oy + math.cos(time.time() * 0.5 + p.ox) * 0.05
-            pv = Vec3(p.x, p.y, p.z).rotate_y(self.rot_y * 0.3).rotate_x(self.rot_x * 0.2)
-            px, py, pz = pv.project(self.width, self.height, fov=fov * 0.9)
-            px += int(disp_x * 0.5)
-            py += int(disp_y * 0.5)
-            if pz < 0 and 0 <= px < self.width and 0 <= py < self.height:
-                color = COLORS.CYAN if p.hue == "cyan" else COLORS.MAGENTA
-                pygame.draw.circle(surface, color, (px, py), 1)
+            if fist:
+                p.x += (0.0 - p.x) * dt * 6.5
+                p.y += (0.0 - p.y) * dt * 6.5
+                p.z += (0.0 - p.z) * dt * 6.5
+                d = math.sqrt(p.x**2 + p.y**2 + p.z**2)
+                if d < 0.12:
+                    p.reset()
+            elif self.explosion_wave > 0:
+                expansion_speed = 3.6 * dt
+                r_dist = math.sqrt(p.x**2 + p.y**2 + p.z**2) or 0.1
+                p.x += (p.x / r_dist) * expansion_speed * 1.6 + p.vx * dt * 0.5
+                p.y += (p.y / r_dist) * expansion_speed * 1.6 + p.vy * dt * 0.5
+                p.z += (p.z / r_dist) * expansion_speed * 1.6 + p.vz * dt * 0.5
+                p.life -= dt
+                if p.life <= 0:
+                    p.reset()
+            else:
+                ang_rad = dt * 0.52
+                c_a, s_a = math.cos(ang_rad), math.sin(ang_rad)
+                new_x = p.x * c_a - p.z * s_a
+                new_z = p.x * s_a + p.z * c_a
+                p.x = new_x
+                p.z = new_z
+                p.y += math.sin(time.time() * 2.2 + p.ox) * 0.005
 
-        # Inner core (cyan)
+                r_dist = math.sqrt(p.x**2 + p.y**2 + p.z**2) or 0.1
+                factor = 1.05 / r_dist
+                p.x += (p.x * (factor - 1.0)) * dt * 0.82
+                p.y += (p.y * (factor - 1.0)) * dt * 0.82
+                p.z += (p.z * (factor - 1.0)) * dt * 0.82
+
+            p_rot = Vec3(p.x, p.y, p.z).rotate_y(self.rot_y).rotate_x(self.rot_x).rotate_z(self.rot_z)
+            px, py, pz = p_rot.project(self.width, self.height, fov=fov)
+            px += int(disp_x)
+            py += int(disp_y)
+
+            if pz > -2.95 and 0 <= px < self.width and 0 <= py < self.height:
+                z_ratio = max(0.1, min(1.0, 1.0 - (pz / 1.5)))
+                if self.explosion_wave > 0:
+                    z_ratio *= max(0.0, min(1.0, p.life / p.max_life))
+                color_comb = p.color
+                if self.explosion_wave > 0:
+                    color_comb = COLORS.YELLOW if random.random() > 0.5 else COLORS.WHITE
+                part_color = (
+                    int(color_comb[0] * z_ratio),
+                    int(color_comb[1] * z_ratio),
+                    int(color_comb[2] * z_ratio),
+                )
+                pygame.draw.circle(surface, part_color, (px, py), p.size)
+
+        # Draw core wireframes
         for i, j in self.inner_e:
             p1, p2 = inner_proj[i], inner_proj[j]
-            avg_z = (p1[2] + p2[2]) / 2
-            color = COLORS.DEEP_CYAN if avg_z > 0 else COLORS.CYAN
-            pygame.draw.line(surface, color, (p1[0], p1[1]), (p2[0], p2[1]))
+            avg_z = (p1[2] + p2[2]) / 2.0
+            c_factor = max(0.2, min(1.0, 1.1 - (avg_z / 1.0)))
+            color = (
+                int(COLORS.DEEP_CYAN[0] * c_factor),
+                int(COLORS.DEEP_CYAN[1] * c_factor),
+                int(COLORS.DEEP_CYAN[2] * c_factor)
+            ) if avg_z > 0.1 else (
+                int(COLORS.CYAN[0] * c_factor),
+                int(COLORS.CYAN[1] * c_factor),
+                int(COLORS.CYAN[2] * c_factor)
+            )
+            pygame.draw.line(surface, color, (p1[0], p1[1]), (p2[0], p2[1]), 1)
 
-        # Outer core (magenta)
         outer_color = COLORS.CYAN if pinch else COLORS.MAGENTA
-        line_w = 2 if pinch else 1
         for i, j in self.outer_e:
             p1, p2 = outer_proj[i], outer_proj[j]
-            avg_z = (p1[2] + p2[2]) / 2
-            color = (53, 8, 32) if avg_z > 0.1 else outer_color
-            pygame.draw.line(surface, color, (p1[0], p1[1]), (p2[0], p2[1]), line_w)
+            avg_z = (p1[2] + p2[2]) / 2.0
+            c_factor = max(0.1, min(1.0, 1.0 - (avg_z / 1.2)))
+            edge_color = (
+                int(outer_color[0] * c_factor),
+                int(outer_color[1] * c_factor),
+                int(outer_color[2] * c_factor),
+            )
+            pygame.draw.line(surface, edge_color, (p1[0], p1[1]), (p2[0], p2[1]), 2 if pinch else 1)
 
-        # Scan line
-        self.scan_y = (self.scan_y + dt * 120) % self.height
-        scan_color = (0, 80, 80, 40)
+        # Rotating tech concentric circular rings
+        self._draw_3d_ring(
+            surface, radius=1.45 * self.current_scale, rot_x=self.rot_x, rot_y=-self.rot_y * 0.7, rot_z=self.rot_z,
+            disp_x=disp_x, disp_y=disp_y, fov=fov, color=COLORS.MAGENTA, width=1, segmented=True, num_points=60
+        )
+        self._draw_3d_ring(
+            surface, radius=1.12 * self.current_scale, rot_x=-self.rot_x, rot_y=self.rot_y * 1.3, rot_z=-self.rot_z * 0.5,
+            disp_x=disp_x, disp_y=disp_y, fov=fov, color=COLORS.CYAN, width=1, segmented=False, num_points=48
+        )
+        self._draw_3d_ring(
+            surface, radius=1.75 * self.current_scale, rot_x=0.0, rot_y=self.rot_y, rot_z=0.0,
+            disp_x=disp_x, disp_y=disp_y, fov=fov, color=COLORS.GREEN if self.is_dragging else COLORS.GRID, width=1, segmented=True, num_points=72
+        )
+
+        # Orbiting satellite systems
+        t1 = time.time() * 2.5
+        sat1_local = Vec3(1.5 * self.current_scale * math.cos(t1), 0.0, 1.5 * self.current_scale * math.sin(t1))
+        sat1_rot = sat1_local.rotate_y(self.rot_y).rotate_x(self.rot_x).rotate_z(self.rot_z)
+        px1, py1, pz1 = sat1_rot.project(self.width, self.height, fov=fov)
+        px1 += int(disp_x)
+        py1 += int(disp_y)
+        if pz1 > -2.95:
+            pygame.draw.circle(surface, COLORS.YELLOW, (px1, py1), 4)
+            pygame.draw.circle(surface, COLORS.YELLOW, (px1, py1), 8, 1)
+
+        t2 = -time.time() * 1.8
+        sat2_local = Vec3(0.0, 1.25 * self.current_scale * math.cos(t2), 1.25 * self.current_scale * math.sin(t2))
+        sat2_rot = sat2_local.rotate_y(self.rot_y).rotate_x(self.rot_x).rotate_z(self.rot_z)
+        px2, py2, pz2 = sat2_rot.project(self.width, self.height, fov=fov)
+        px2 += int(disp_x)
+        py2 += int(disp_y)
+        if pz2 > -2.95:
+            pygame.draw.circle(surface, COLORS.CYAN, (px2, py2), 4)
+
+        # Axis indicator labels in 3D projective space
+        axes = [
+            (Vec3(1.7 * self.current_scale, 0, 0), "E_X", COLORS.MAGENTA),
+            (Vec3(0, 1.7 * self.current_scale, 0), "E_Y", COLORS.GREEN),
+            (Vec3(0, 0, 1.7 * self.current_scale), "E_Z", COLORS.CYAN),
+        ]
+        font_sm = pygame.font.SysFont("consolas", 11)
+        for v, label, color in axes:
+            v_rot = v.rotate_y(self.rot_y).rotate_x(self.rot_x).rotate_z(self.rot_z)
+            px, py, pz = v_rot.project(self.width, self.height, fov=fov)
+            px += int(disp_x)
+            py += int(disp_y)
+            if pz > -2.95:
+                pygame.draw.circle(surface, color, (px, py), 2)
+                lbl_s = font_sm.render(label, True, color)
+                surface.blit(lbl_s, (px + 6, py - 6))
+
+        # Dynamic tether line drawing during hologram displacement
+        if self.is_dragging:
+            hx_screen = int(hand_x * self.width)
+            hy_screen = int(hand_y * self.height)
+            holo_center_x = int(cx + disp_x)
+            holo_center_y = int(cy + disp_y)
+            pygame.draw.line(surface, COLORS.GREEN, (hx_screen, hy_screen), (holo_center_x, holo_center_y), 1)
+            pygame.draw.circle(surface, COLORS.GREEN, (hx_screen, hy_screen), 11, 1)
+            pygame.draw.circle(surface, COLORS.GREEN, (hx_screen, hy_screen), 3)
+
+        self.scan_y = (self.scan_y + dt * 110) % self.height
         scan_surf = pygame.Surface((self.width, 3), pygame.SRCALPHA)
-        scan_surf.fill(scan_color)
+        scan_surf.fill((0, 255, 255, 30))
         surface.blit(scan_surf, (0, int(self.scan_y)))
 
-        # Swipe flash ring
+        if swipe:
+            self.swipe_flash = 1.0
+        self.swipe_flash = max(0.0, self.swipe_flash - dt * 2.2)
         if self.swipe_flash > 0:
-            radius = int((1.0 - self.swipe_flash) * min_dim * 0.5)
-            pygame.draw.circle(surface, COLORS.GREEN, (int(cx), int(cy)), radius, 2)
+            radius = int((1.0 - self.swipe_flash) * min_dim * 0.55)
+            flash_alpha = int(self.swipe_flash * 255)
+            flash_surf = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            pygame.draw.circle(flash_surf, (0, 255, 0, flash_alpha // 3), (int(cx + disp_x), int(cy + disp_y)), radius, 2)
+            surface.blit(flash_surf, (0, 0))
 
-        # HUD corners
         self._draw_corners(surface)
         self._draw_hud_text(surface, hand_detected, fist, pinch, swipe, target_pitch, target_yaw)
 
@@ -200,19 +467,20 @@ class HologramRenderer:
 
         lines = [
             (font, f"MATRIX: {self.form}", COLORS.MAGENTA, (14, 12)),
-            (small, f"PITCH: {int(pitch):+4d}°  YAW: {int(yaw):+4d}°", COLORS.CYAN, (14, 32)),
+            (small, f"YAW {int(yaw):+3d}° | PIT {int(pitch):+3d}° | ROLL {int(self.rot_z % 360):03d}°", COLORS.CYAN, (14, 32)),
+            (small, f"HOLO POS: X {self.holo_x:+.2f} | Y {self.holo_y:+.2f}", COLORS.YELLOW if self.is_dragging else COLORS.MUTED, (14, 50)),
         ]
         if fist:
-            status, sc = "FIST COMPRESS", COLORS.MAGENTA
+            status, sc = "FIST COMPRESS: ACOUSTIC CORES COMPRESSING", COLORS.MAGENTA
         elif pinch:
-            status, sc = "PINCH LOCK", COLORS.CYAN
+            status, sc = "PINCH GRASP: STATIC MATRIX POSITION DRAGGING", COLORS.GREEN
         elif detected:
-            status, sc = "PALM TRACKING", COLORS.GREEN
+            status, sc = "PALM TRACK: KINETIC STEERING ORIENTATION", COLORS.CYAN
         else:
-            status, sc = "SCANNING...", COLORS.MUTED
+            status, sc = "SCANNING... POSITION RECENTERED", COLORS.MUTED
         lines.append((font, f"STATUS: {status}", sc, (14, self.height - 28)))
         if swipe:
-            lines.append((small, f"SWIPE: {swipe}", COLORS.YELLOW, (14, self.height - 48)))
+            lines.append((small, f"VECTOR EVENT: {swipe}", COLORS.YELLOW, (14, self.height - 48)))
 
         for fn, text, color, pos in lines:
             surface.blit(fn.render(text, True, color), pos)
@@ -278,7 +546,7 @@ class CyberdeckApp:
         pygame.init()
         pygame.display.set_caption("CYBERDECK GESTURE CONTROLLER v3.0 — NATIVE")
         self.screen = pygame.display.set_mode((WIN_W, WIN_H))
-        self.clock = pygame.clock.Clock()
+        self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("consolas", 14)
         self.font_sm = pygame.font.SysFont("consolas", 11)
         self.font_lg = pygame.font.SysFont("consolas", 18, bold=True)

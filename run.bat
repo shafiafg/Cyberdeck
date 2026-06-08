@@ -29,8 +29,15 @@ echo [2/3] Activating virtual environment...
 call venv\Scripts\activate.bat
 if errorlevel 1 goto activate_failed
 
+:: 3.5. Ensure pip, setuptools, and wheel are up-to-date to find pre-compiled wheels
+echo Upgrading package managers (pip, setuptools, wheel)...
+python -m pip install --upgrade pip setuptools wheel
+if errorlevel 1 (
+    echo [WARNING] Minimal failure upgrading installer tools. Continuing installation...
+)
+
 :: 4. Install Dependencies
-echo [3/3] Installing libraries (opencv, mediapipe, pygame, etc.)...
+echo [3/3] Installing libraries (opencv, mediapipe, pygame-ce, etc.)...
 echo (This might take 30-40 seconds on the first run as it downloads them...)
 echo.
 pip install -r requirements.txt

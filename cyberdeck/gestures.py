@@ -27,6 +27,7 @@ class HandState:
     smooth_y: float = 0.5
     fist: bool = False
     pinch: bool = False
+    point: bool = False
     swipe: Optional[str] = None
     swipe_timer: float = 0.0
     landmarks: Optional[List[Dict[str, float]]] = None
@@ -47,6 +48,7 @@ class GestureEngine:
         self._swipe_cooldown_until = 0.0
         self._was_fist = False
         self._was_pinch = False
+        self._was_point = False
         self._was_detected = False
 
     def set_smoothing(self, value: float) -> None:
@@ -103,19 +105,33 @@ class GestureEngine:
             else:
                 state.events.append("FIST_MOVE")
         else:
-            pinch_dist = self._dist(index, thumb)
-            if pinch_dist < self.PINCH_THRESHOLD:
-                state.pinch = True
-                cx = (index.x + thumb.x) / 2.0
-                cy = (index.y + thumb.y) / 2.0
-                state.palm_x = max(0.0, min(1.0, cx))
-                state.palm_y = max(0.0, min(1.0, cy))
-                if not self._was_pinch:
-                    state.events.append("PINCH_START")
+            # Pointing gesture: index extended, others curled
+            is_point = (
+                finger_ratios[0] > 1.6 and
+                finger_ratios[1] < 1.3 and
+                finger_ratios[2] < 1.3 and
+                finger_ratios[3] < 1.3
+            )
+            if is_point:
+                state.point = True
+                if not self._was_point:
+                    state.events.append("POINT_START")
                 else:
-                    state.events.append("PINCH_MOVE")
+                    state.events.append("POINT_MOVE")
             else:
-                state.events.append("PALM_MOVE")
+                pinch_dist = self._dist(index, thumb)
+                if pinch_dist < self.PINCH_THRESHOLD:
+                    state.pinch = True
+                    cx = (index.x + thumb.x) / 2.0
+                    cy = (index.y + thumb.y) / 2.0
+                    state.palm_x = max(0.0, min(1.0, cx))
+                    state.palm_y = max(0.0, min(1.0, cy))
+                    if not self._was_pinch:
+                        state.events.append("PINCH_START")
+                    else:
+                        state.events.append("PINCH_MOVE")
+                else:
+                    state.events.append("PALM_MOVE")
 
         wrist_x = wrist.x
         if self._prev_wrist_x is not None and now >= self._swipe_cooldown_until:
@@ -133,6 +149,7 @@ class GestureEngine:
 
         self._was_fist = state.fist
         self._was_pinch = state.pinch
+        self._was_point = state.point
         self._was_detected = True
         return state
 
@@ -142,6 +159,7 @@ class GestureEngine:
             state.events.append("HAND_LOST")
         self._was_fist = False
         self._was_pinch = False
+        self._was_point = False
         self._was_detected = False
         self._prev_wrist_x = None
         return state
@@ -159,6 +177,7 @@ class GestureEngine:
         current.palm_y = state.palm_y
         current.fist = state.fist
         current.pinch = state.pinch
+        current.point = state.point
         current.landmarks = state.landmarks
         if state.swipe:
             current.swipe = state.swipe
